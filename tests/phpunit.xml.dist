@@ -14,7 +14,7 @@
     syntaxCheck                 = "false"
     verbose                     = "true">
 
-  <testsuite name="PhantomJS Installer - Test Suite">
+  <testsuite name="Electron Installer - Test Suite">
      <directory suffix=".php">./</directory>
   </testsuite>
 

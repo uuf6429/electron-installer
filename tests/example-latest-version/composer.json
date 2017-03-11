@@ -1,16 +1,16 @@
 {
     "require": {
-        "jakoch/phantomjs-installer": "dev-master"
+        "uuf6429/electron-installer": "dev-master"
     },
     "config": {
         "bin-dir": "bin"
     },
     "scripts": {
         "post-install-cmd": [
-            "PhantomInstaller\\Installer::installPhantomJS"
+            "ElectronInstaller\\Installer::installElectron"
         ],
         "post-update-cmd": [
-            "PhantomInstaller\\Installer::installPhantomJS"
+            "ElectronInstaller\\Installer::installElectron"
         ]
     }
 }

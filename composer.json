@@ -1,10 +1,14 @@
 {
-    "name": "jakoch/phantomjs-installer",
-    "description": "A Composer package which installs the PhantomJS binary (Linux, Windows, Mac) into `/bin` of your project.",
+    "name": "uuf6429/electron-installer",
+    "description": "A Composer package which installs the Electron binary (Linux, Windows, Mac) into `/bin` of your project.",
     "type": "custom-installer",
-    "keywords": ["phantomjs", "headless", "binaries"],
+    "keywords": ["electron", "headless", "binaries"],
     "license": "MIT",
     "authors": [
+        {
+            "name": "Christian Sciberras",
+            "email": "christian@sciberras.me"
+        },
         {
             "name": "Jens-André Koch",
             "email": "jakoch@web.de"
@@ -21,10 +25,10 @@
     },
     "autoload": {
         "psr-4": {
-            "PhantomInstaller\\Test\\" : "tests/"
+            "ElectronInstaller\\Test\\" : "tests/"
         },
         "psr-0": {
-            "PhantomInstaller\\": "src/"
+            "ElectronInstaller\\": "src/"
         }
     }
 }

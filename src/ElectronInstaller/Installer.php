@@ -1,19 +1,11 @@
 <?php
 
-/*
- * This file is part of the "jakoch/phantomjs-installer" package.
- *
- * Copyright (c) 2013-2016 Jens-André Koch <jakoch@web.de>
- *
- * The content is released under the MIT License. Please view
- * the LICENSE file that was distributed with this source code.
- */
-
-namespace PhantomInstaller;
+namespace ElectronInstaller;
 
 use Composer\Composer;
 use Composer\Downloader\TransportException;
 use Composer\IO\BaseIO as IO;
+use Composer\Package\Link;
 use Composer\Package\Package;
 use Composer\Package\RootPackageInterface;
 use Composer\Package\Version\VersionParser;
@@ -21,13 +13,13 @@ use Composer\Script\Event;
 
 class Installer
 {
-    const PHANTOMJS_NAME = 'PhantomJS';
+    const ELECTRON_NAME = 'Electron';
 
-    const PHANTOMJS_TARGETDIR = '/jakoch/phantomjs';
+    const ELECTRON_TARGETDIR = '/uuf6429/electron';
 
-    const PHANTOMJS_CHMODE = 0770; // octal !
+    const ELECTRON_CHMODE = 0770; // octal !
 
-    const PACKAGE_NAME = 'jakoch/phantomjs-installer';
+    const PACKAGE_NAME = 'uuf6429/electron-installer';
 
     /** @var Composer */
     protected $composer;
@@ -78,9 +70,9 @@ class Installer
     }
 
     /**
-     * installPhantomJS is the main function of the install script.
+     * installElectron is the main function of the install script.
      *
-     * It installs PhantomJs into the defined /bin folder,
+     * It installs Electron into the defined /bin folder,
      * taking operating system dependend archives into account.
      *
      * You need to invoke it from the scripts section of your
@@ -88,7 +80,7 @@ class Installer
      *
      * @param Event $event
      */
-    public static function installPhantomJS(Event $event)
+    public static function installElectron(Event $event)
     {
         $installer = new static($event->getComposer(), $event->getIO());
         return $installer->__invoke();
@@ -103,35 +95,58 @@ class Installer
         $binDir = $config->get('bin-dir');
 
         // the installation folder depends on the vendor-dir (default prefix is './vendor')
-        $targetDir = $config->get('vendor-dir') . static::PHANTOMJS_TARGETDIR;
+        $targetDir = $config->get('vendor-dir') . static::ELECTRON_TARGETDIR;
 
         $io = $this->getIO();
 
         // do not install a lower or equal version
-        $phantomJsBinary = $this->getPhantomJsBinary($binDir);
-        if ($phantomJsBinary) {
-            $installedVersion = $this->getPhantomJsVersionFromBinary($phantomJsBinary);
+        $electronBinary = $this->getElectronBinary($binDir);
+        if ($electronBinary) {
+            $installedVersion = $this->getElectronVersionFromBinary($electronBinary);
             if (version_compare($version, $installedVersion) !== 1) {
-                $io->write('   - PhantomJS v' . $installedVersion . ' is already installed. Skipping the installation.');
+                $io->write('   - Electron v' . $installedVersion . ' is already installed. Skipping the installation.');
                 return;
             }
         }
 
-        // Download the Archive
+        // download the archive & install
         if ($this->download($targetDir, $version)) {
-            // Copy only the PhantomJS binary from the installation "target dir" to the "bin" folder
+            $os = $this->getOS();
 
-            $this->copyPhantomJsBinaryToBinFolder($targetDir, $binDir);
+            switch ($os) {
+                case 'win32':
+                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron.exe';
+                    break;
+
+                case 'linux':
+                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron';
+                    break;
+
+                case 'darwin':
+                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'Electron.app';
+                    break;
+
+                default:
+                    throw new \RuntimeException('Can not detect Electron binary; OS "' . $os . '" not supported.');
+            }
+
+            if (!file_exists($binaryPath)) {
+                throw new \RuntimeException('Can not detect Electron binary; file/path "' . $binaryPath . '" does not exist.');
+            }
+
+            @chmod($binaryPath, static::ELECTRON_CHMODE);
+
+            $this->dropClassWithPathToInstalledBinary($binaryPath);
         }
     }
 
     /**
-     * Get PhantomJS application version. Equals running "phantomjs -v" on the CLI.
+     * Get Electron application version. Equals running "electron -v" on the CLI.
      *
      * @param string $pathToBinary
-     * @return string PhantomJS Version
+     * @return string Electron Version
      */
-    public function getPhantomJsVersionFromBinary($pathToBinary)
+    public function getElectronVersionFromBinary($pathToBinary)
     {
         $io = $this->getIO();
 
@@ -141,23 +156,23 @@ class Installer
             $version = $stdout[0];
             return $version;
         } catch (\Exception $e) {
-            $io->warning("Caught exception while checking PhantomJS version:\n" . $e->getMessage());
-            $io->notice('Re-downloading PhantomJS');
+            $io->warning("Caught exception while checking Electron version:\n" . $e->getMessage());
+            $io->notice('Re-downloading Electron');
             return false;
         }
     }
 
     /**
-     * Get path to PhantomJS binary.
+     * Get path to Electron binary.
      *
      * @param string $binDir
      * @return string|bool Returns false, if file not found, else filepath.
      */
-    public function getPhantomJsBinary($binDir)
+    public function getElectronBinary($binDir)
     {
         $os = $this->getOS();
 
-        $binary = $binDir . '/phantomjs';
+        $binary = $binDir . '/electron';
 
         if ($os === 'windows') {
             // the suffix for binaries on windows is ".exe"
@@ -183,7 +198,7 @@ class Installer
     {
         $io = $this->getIO();
         $downloadManager = $this->getComposer()->getDownloadManager();
-        $retries = count($this->getPhantomJsVersions());
+        $retries = count($this->getElectronVersions());
 
         while ($retries--) {
             $package = $this->createComposerInMemoryPackage($targetDir, $version);
@@ -203,10 +218,12 @@ class Installer
                 }
             } catch (\Exception $e) {
                 $message = $e->getMessage();
-                $io->error(PHP_EOL . '<error>While downloading version ' . $version . ' the following error accoured: ' . $message . '</error>');
+                $io->error(PHP_EOL . '<error>While downloading version ' . $version . ' the following error occurred: ' . $message . '</error>');
                 return false;
             }
         }
+
+        return false;
     }
 
     /**
@@ -223,7 +240,7 @@ class Installer
         $versionParser = new VersionParser();
         $normVersion = $versionParser->normalize($version);
 
-        $package = new Package(static::PHANTOMJS_NAME, $normVersion, $version);
+        $package = new Package(static::ELECTRON_NAME, $normVersion, $version);
         $package->setTargetDir($targetDir);
         $package->setInstallationSource('dist');
         $package->setDistType(pathinfo($url, PATHINFO_EXTENSION) === 'zip' ? 'zip' : 'tar'); // set zip, tarball
@@ -233,23 +250,23 @@ class Installer
     }
 
     /**
-     * Returns an array with PhantomJs version numbers.
+     * Returns an array with Electron version numbers.
      *
-     * @return array PhantomJs version numbers
+     * @return array Electron version numbers
      */
-    public function getPhantomJsVersions()
+    public function getElectronVersions()
     {
-        return array('2.1.1', '2.0.0', '1.9.8', '1.9.7');
+        return array('1.6.2', '1.6.1', '1.4.15', '1.4.14', '1.4.13', '1.4.12');
     }
 
     /**
-     * Returns the latest PhantomJsVersion.
+     * Returns the latest Electron Version.
      *
-     * @return string Latest PhantomJs Version.
+     * @return string Latest Electron Version.
      */
-    public function getLatestPhantomJsVersion()
+    public function getLatestElectronVersion()
     {
-        $versions = $this->getPhantomJsVersions();
+        $versions = $this->getElectronVersions();
 
         return $versions[0];
     }
@@ -262,16 +279,18 @@ class Installer
      */
     public function getLowerVersion($old_version)
     {
-        foreach ($this->getPhantomJsVersions() as $idx => $version) {
+        foreach ($this->getElectronVersions() as $idx => $version) {
             // if $old_version is bigger than $version from versions array, return $version
             if (version_compare($old_version, $version) == 1) {
                 return $version;
             }
         }
+
+        return null;
     }
 
     /**
-     * Returns the PhantomJS version number.
+     * Returns the Electron version number.
      *
      * Firstly, we search for a version number in the local repository,
      * secondly, in the root package.
@@ -284,6 +303,7 @@ class Installer
         $composer = $this->getComposer();
 
         // try getting the version from the local repository
+        $version = null;
         $packages = $composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages();
         foreach ($packages as $package) {
             if ($package->getName() === static::PACKAGE_NAME) {
@@ -302,7 +322,7 @@ class Installer
 
         // fallback to the hardcoded latest version, if "dev-master" was set
         if ($version === 'dev-master') {
-            return $this->getLatestPhantomJsVersion();
+            return $this->getLatestElectronVersion();
         }
 
         // grab version from commit-reference, e.g. "dev-master#<commit-ref> as version"
@@ -334,6 +354,7 @@ class Installer
     {
         foreach (array($package->getRequires(), $package->getDevRequires()) as $requiredPackages) {
             if (isset($requiredPackages[static::PACKAGE_NAME])) {
+                /** @var Link[] $requiredPackages */
                 return $requiredPackages[static::PACKAGE_NAME]->getPrettyConstraint();
             }
         }
@@ -341,63 +362,17 @@ class Installer
     }
 
     /**
-     * Copies the PhantomJs binary to the bin folder.
-     * Takes different "folder structure" of the archives and different "binary file names" into account.
-     *
-     * @param  string $targetDir path to /vendor/jakoch/phantomjs
-     * @param  string $binDir path to binary folder
-     *
-     * @return bool True, if file dropped. False, otherwise.
-     */
-    public function copyPhantomJsBinaryToBinFolder($targetDir, $binDir)
-    {
-        if (!is_dir($binDir)) {
-            mkdir($binDir);
-        }
-
-        $os = $this->getOS();
-
-        $sourceName = '/bin/phantomjs';
-        $targetName = $binDir . '/phantomjs';
-
-        if ($os === 'windows') {
-            // the suffix for binaries on windows is ".exe"
-            $sourceName .= '.exe';
-            $targetName .= '.exe';
-
-            /**
-             * The release folder structure changed between versions.
-             * For versions up to v1.9.8, the executables resides at the root.
-             * From v2.0.0 on, the executable resides in the bin folder.
-             */
-            if (is_file($targetDir . '/phantomjs.exe')) {
-                $sourceName = str_replace('/bin', '', $sourceName);
-            }
-
-            // slash fix (not needed, but looks better on the dropped php file)
-            $targetName = str_replace('/', '\\', $targetName);
-        }
-
-        if ($os !== 'unknown') {
-            copy($targetDir . $sourceName, $targetName);
-            chmod($targetName, static::PHANTOMJS_CHMODE);
-        }
-
-        $this->dropClassWithPathToInstalledBinary($targetName);
-    }
-
-    /**
-     * Drop php class with path to installed phantomjs binary for easier usage.
+     * Drop php class with path to installed electron binary for easier usage.
      *
      * Usage:
      *
-     * use PhantomInstaller\PhantomBinary;
+     * use ElectronInstaller\ElectronBinary;
      *
-     * $bin = PhantomInstaller\PhantomBinary::BIN;
-     * $dir = PhantomInstaller\PhantomBinary::DIR;
+     * $bin = ElectronInstaller\ElectronBinary::BIN;
+     * $dir = ElectronInstaller\ElectronBinary::DIR;
      *
-     * $bin = PhantomInstaller\PhantomBinary::getBin();
-     * $dir = PhantomInstaller\PhantomBinary::getDir();
+     * $bin = ElectronInstaller\ElectronBinary::getBin();
+     * $dir = ElectronInstaller\ElectronBinary::getDir();
      *
      * @param  string $binaryPath full path to binary
      *
@@ -407,9 +382,9 @@ class Installer
     {
         $code = "<?php\n";
         $code .= "\n";
-        $code .= "namespace PhantomInstaller;\n";
+        $code .= "namespace ElectronInstaller;\n";
         $code .= "\n";
-        $code .= "class PhantomBinary\n";
+        $code .= "class ElectronBinary\n";
         $code .= "{\n";
         $code .= "    const BIN = '%binary%';\n";
         $code .= "    const DIR = '%binary_dir%';\n";
@@ -431,46 +406,25 @@ class Installer
             $code
         );
 
-        return (bool)file_put_contents(__DIR__ . '/PhantomBinary.php', $fileContent);
+        return (bool)file_put_contents(__DIR__ . '/ElectronBinary.php', $fileContent);
     }
 
     /**
-     * Returns the URL of the PhantomJS distribution for the installing OS.
+     * Returns the URL of the Electron distribution for the installing OS.
      *
      * @param string $version
      * @return string Download URL
      */
     public function getURL($version)
     {
-        $file = false;
-        $os = $this->getOS();
         $cdn_url = $this->getCdnUrl($version);
 
-        if ($os === 'windows') {
-            $file = 'phantomjs-' . $version . '-windows.zip';
-        }
-
-        if ($os === 'linux') {
-            $bitsize = $this->getBitSize();
-
-            if ($bitsize === '32') {
-                $file = 'phantomjs-' . $version . '-linux-i686.tar.bz2';
-            }
-
-            if ($bitsize === '64') {
-                $file = 'phantomjs-' . $version . '-linux-x86_64.tar.bz2';
-            }
-        }
-
-        if ($os === 'macosx') {
-            $file = 'phantomjs-' . $version . '-macosx.zip';
-        }
-
-        # OS unknown
-        if ($file === false) {
+        if (($os = $this->getOS()) && ($arch = $this->getArch())) {
+            $file = sprintf('electron-v%s-%s-%s.zip', $version, $os, $arch);
+        } else {
             throw new \RuntimeException(
-                'The Installer could not select a PhantomJS package for this OS.
-                Please install PhantomJS manually into the /bin folder of your project.'
+                'The Installer could not select a Electron package for this OS.
+                Please install Electron manually into the /bin folder of your project.'
             );
         }
 
@@ -480,36 +434,16 @@ class Installer
     /**
      * Default CDN URL
      */
-    const PHANTOMJS_CDNURL_DEFAULT = 'https://api.bitbucket.org/2.0/repositories/ariya/phantomjs/downloads/';
+    const ELECTRON_CDNURL_DEFAULT = 'https://github.com/electron/electron/';
 
     /**
      * Returns the base URL for downloads.
      *
      * Checks (order by highest precedence on top):
-     * - ENV var "PHANTOMJS_CDNURL"
-     * - SERVER var "PHANTOMJS_CDNURL"
-     * - $['extra']['jakoch/phantomjs-installer']['cdnurl'] in composer.json
-     * - default location (bitbucket)
-     *
-     * == Official Downloads
-     *
-     * The old versions up to v1.9.2 were hosted on https://phantomjs.googlecode.com/files/
-     * Newer versions are hosted on https://bitbucket.org/ariya/phantomjs/downloads/
-     * Downloads via APIv2: https://api.bitbucket.org/2.0/repositories/ariya/phantomjs/downloads/
-     *
-     * == Mirrors
-     *
-     * NPM USA
-     *  https://cnpmjs.org/downloads
-     *  https://cnpmjs.org/mirrors/phantomjs/phantomjs-2.1.1-windows.zip
-     *
-     * NPM China
-     *  https://npm.taobao.org/mirrors/phantomjs/
-     *  https://npm.taobao.org/mirrors/phantomjs/phantomjs-2.1.1-windows.zip
-     *
-     * Github, USA, SF
-     *  https://github.com/Medium/phantomjs/
-     *  https://github.com/Medium/phantomjs/releases/download/v2.1.1/phantomjs-2.1.1-windows.zip
+     * - ENV var "ELECTRON_CDNURL"
+     * - SERVER var "ELECTRON_CDNURL"
+     * - $['extra']['uuf6429/electron-installer']['cdnurl'] in composer.json
+     * - default location (github)
      *
      * @param string $version
      *
@@ -522,16 +456,16 @@ class Installer
 
         // override the detection of the default URL
         // by checking for an env var and returning early
-        if (isset($_ENV['PHANTOMJS_CDNURL'])) {
-            $url = $_ENV['PHANTOMJS_CDNURL'];
-        } elseif (isset($_SERVER['PHANTOMJS_CDNURL'])) {
-            $url = $_SERVER['PHANTOMJS_CDNURL'];
+        if (isset($_ENV['ELECTRON_CDNURL'])) {
+            $url = $_ENV['ELECTRON_CDNURL'];
+        } elseif (isset($_SERVER['ELECTRON_CDNURL'])) {
+            $url = $_SERVER['ELECTRON_CDNURL'];
         } elseif (isset($extraData[static::PACKAGE_NAME]['cdnurl'])) {
             $url = $extraData[static::PACKAGE_NAME]['cdnurl'];
         }
 
         if ($url == '') {
-            $url = static::PHANTOMJS_CDNURL_DEFAULT;
+            $url = static::ELECTRON_CDNURL_DEFAULT;
         }
 
         // add slash at the end of the URL, if missing
@@ -539,8 +473,8 @@ class Installer
             $url .= '/';
         }
 
-        // add version to URL when using "github.com/medium/phantomjs"
-        if (substr(strtolower($url), -28) == 'github.com/medium/phantomjs/') {
+        // add version to URL when using "github.com/electron/electron"
+        if (substr(strtolower($url), -29) == 'github.com/electron/electron/') {
             $url .= 'releases/download/v' . $version . '/';
         }
 
@@ -550,61 +484,62 @@ class Installer
     /**
      * Returns the Operating System.
      *
-     * @return string OS, e.g. macosx, windows, linux.
+     * @return string|null OS, e.g. darwin, win32, linux.
      */
     public function getOS()
     {
         // override the detection of the operation system
         // by checking for an env var and returning early
-        if (isset($_ENV['PHANTOMJS_PLATFORM'])) {
-            return strtolower($_ENV['PHANTOMJS_PLATFORM']);
+        if (isset($_ENV['ELECTRON_PLATFORM'])) {
+            return strtolower($_ENV['ELECTRON_PLATFORM']);
         }
 
-        if (isset($_SERVER['PHANTOMJS_PLATFORM'])) {
-            return strtolower($_SERVER['PHANTOMJS_PLATFORM']);
+        if (isset($_SERVER['ELECTRON_PLATFORM'])) {
+            return strtolower($_SERVER['ELECTRON_PLATFORM']);
         }
 
         $uname = strtolower(php_uname());
 
-        if (strpos($uname, 'darwin') !== false ||
-            strpos($uname, 'openbsd') !== false ||
-            strpos($uname, 'freebsd') !== false
-        ) {
-            return 'macosx';
-        } elseif (strpos($uname, 'win') !== false) {
-            return 'windows';
-        } elseif (strpos($uname, 'linux') !== false) {
-            return 'linux';
-        } else {
-            return 'unknown';
+        switch (true) {
+            case strpos($uname, 'darwin') !== false:
+                return 'darwin';
+
+            case strpos($uname, 'win') !== false:
+                return 'win32';
+
+            case strpos($uname, 'linux') !== false:
+                return 'linux';
+
+            default:
+                return null;
         }
     }
 
     /**
-     * Returns the Bit-Size.
+     * Returns the architecture.
      *
-     * @return string BitSize, e.g. 32, 64.
+     * @return string|null Architecture, e.g. ia32, x64, arm.
      */
-    public function getBitSize()
+    public function getArch()
     {
-        // override the detection of the bitsize
-        // by checking for an env var and returning early
-        if (isset($_ENV['PHANTOMJS_BITSIZE'])) {
-            return strtolower($_ENV['PHANTOMJS_BITSIZE']);
+        // override the detection of the architecture by checking for an env var and returning early
+        if (isset($_ENV['ELECTRON_ARCHITECTURE'])) {
+            return strtolower($_ENV['ELECTRON_ARCHITECTURE']);
         }
 
-        if (isset($_SERVER['PHANTOMJS_BITSIZE'])) {
-            return strtolower($_SERVER['PHANTOMJS_BITSIZE']);
+        if (isset($_SERVER['ELECTRON_ARCHITECTURE'])) {
+            return strtolower($_SERVER['ELECTRON_ARCHITECTURE']);
         }
 
-        if (PHP_INT_SIZE === 4) {
-            return '32';
-        }
+        switch (true) {
+            case PHP_INT_SIZE === 4:
+                return 'ia32';
 
-        if (PHP_INT_SIZE === 8) {
-            return '64';
-        }
+            case PHP_INT_SIZE === 8:
+                return 'x64';
 
-        return (string)PHP_INT_SIZE; // 16-bit?
+            default:
+                return null;
+        }
     }
 }

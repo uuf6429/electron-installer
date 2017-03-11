@@ -1,20 +1,14 @@
-# Netbeans
+# Common IDEs
 /nbproject
-
-# Eclipse
 /.settings
 /.buildpath
 /.project
+/.idea
 
 # Composer
 /composer.phar
 /composer.lock
 /vendor
 
-# Vagrant
-.vagrant
-Vagrantfile
-
-.idea
-
-/src/PhantomInstaller/PhantomBinary.php
+# Custom entries
+/src/ElectronInstaller/ElectronBinary.php

@@ -1,9 +1,12 @@
 <?php
 
-namespace PhantomInstaller\Test;
+namespace ElectronInstaller\Test;
 
-use PhantomInstaller\Installer;
-use PhantomInstaller\PhantomBinary;
+use Composer\Composer;
+use Composer\IO\BaseIO;
+use Composer\Package\RootPackageInterface;
+use ElectronInstaller\Installer;
+use ElectronInstaller\ElectronBinary;
 
 /**
  * @backupStaticAttributes enabled
@@ -13,9 +16,9 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
     /** @var Installer */
     protected $object;
 
-    protected $bakEnvVars = array();
+    protected $bakEnvVars = [];
 
-    protected $bakServerVars = array();
+    protected $bakServerVars = [];
     
     protected function setUp()
     {
@@ -39,53 +42,53 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
 
     protected function getMockComposer()
     {
-        $mockComposer = $this->getMockBuilder('Composer\Composer')->getMock();
+        $mockComposer = $this->getMockBuilder(Composer::class)->getMock();
 
         return $mockComposer;
     }
 
     protected function getMockIO()
     {
-        $mockIO = $this->getMockBuilder('Composer\IO\BaseIO')->getMockForAbstractClass();
+        $mockIO = $this->getMockBuilder(BaseIO::class)->getMockForAbstractClass();
 
         return $mockIO;
     }
 
-    public function testInstallPhantomJS()
+    public function testInstallElectron()
     {
         // composer testing: mocks.. for nothing
-        //InstallPhantomJS(Event $event)
+        //InstallElectron(Event $event)
         $this->markTestSkipped('contribute ?');
     }
 
-    public function testCopyPhantomJsBinaryToBinFolder()
+    public function testCopyElectronBinaryToBinFolder()
     {
         $this->markTestSkipped('contribute ?');
     }
 
     public function testDropClassWithPathToInstalledBinary()
     {
-        $binaryPath = __DIR__ . '/a_fake_phantomjs_binary';
+        $binaryPath = __DIR__ . '/a_fake_electron_binary';
 
         // generate file
         $this->assertTrue($this->object->dropClassWithPathToInstalledBinary($binaryPath));
-        $this->assertTrue(is_file(dirname(__DIR__) . '/src/PhantomInstaller/PhantomBinary.php'));
+        $this->assertTrue(is_file(dirname(__DIR__) . '/src/ElectronInstaller/ElectronBinary.php'));
 
         // test the generated file
-        require_once dirname(__DIR__) . '/src/PhantomInstaller/PhantomBinary.php';
-        $this->assertSame($binaryPath, PhantomBinary::BIN);
-        $this->assertSame(dirname($binaryPath), PhantomBinary::DIR);
+        require_once dirname(__DIR__) . '/src/ElectronInstaller/ElectronBinary.php';
+        $this->assertSame($binaryPath, ElectronBinary::BIN);
+        $this->assertSame(dirname($binaryPath), ElectronBinary::DIR);
     }
 
     /**
      * @param array $extraConfig mock composer.json 'extra' config with this array
      */
-    public function setUpForGetCdnUrl(array $extraConfig = array())
+    public function setUpForGetCdnUrl(array $extraConfig = [])
     {
         $object = $this->object;
         $mockComposer = $this->getMockComposer();
         $object->setComposer($mockComposer);
-        $mockPackage = $this->getMockBuilder('Composer\Package\RootPackageInterface')->getMock();
+        $mockPackage = $this->getMockBuilder(RootPackageInterface::class)->getMock();
         $mockComposer->method('getPackage')->willReturn($mockPackage);
         $mockPackage->method('getExtra')->willReturn($extraConfig);
     }
@@ -98,7 +101,7 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
         $configuredCdnUrl = 'scheme://host/path'; // without slash
-        $_ENV['PHANTOMJS_CDNURL'] = $configuredCdnUrl;
+        $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertRegExp('{(?:^|[^/])/$}', $cdnurl, 'CdnUrl should end with one slash.');
     }
@@ -111,15 +114,15 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
 
-        // Test rewrite for the Medium url as documented
-        $configuredCdnUrl = 'https://github.com/Medium/phantomjs';
-        $_ENV['PHANTOMJS_CDNURL'] = $configuredCdnUrl;
+        // Test rewrite for the GitHub url as documented
+        $configuredCdnUrl = 'https://github.com/electron/electron';
+        $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertSame($configuredCdnUrl . '/releases/download/v' . $version . '/', $cdnurl);
 
         // Test that a longer url is not rewritten
-        $configuredCdnUrl = 'https://github.com/Medium/phantomjs/releases/download/v1.9.19/';
-        $_ENV['PHANTOMJS_CDNURL'] = $configuredCdnUrl;
+        $configuredCdnUrl = 'https://github.com/electron/electron/releases/download/v1.9.19/';
+        $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertSame($configuredCdnUrl, $cdnurl);
     }
@@ -133,26 +136,26 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
         $version = '1.0.0';
 
         // Test default URL is returned when there is no config
-        $cdnurlExpected = Installer::PHANTOMJS_CDNURL_DEFAULT;
+        $cdnurlExpected = Installer::ELECTRON_CDNURL_DEFAULT;
         $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($cdnurlExpected, $cdnurl);
+        $this->assertStringStartsWith($cdnurlExpected, $cdnurl);
 
         // Test composer.json extra config overrides the default URL
         $cdnurlExpected = 'scheme://host/extra-url/';
-        $extraData = array(Installer::PACKAGE_NAME => array('cdnurl' => $cdnurlExpected));
+        $extraData = [Installer::PACKAGE_NAME => ['cdnurl' => $cdnurlExpected]];
         $this->setUpForGetCdnUrl($extraData);
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertSame($cdnurlExpected, $cdnurl);
 
         // Test $_SERVER var overrides default URL and extra config
         $cdnurlExpected = 'scheme://host/server-var-url/';
-        $_SERVER['PHANTOMJS_CDNURL'] = $cdnurlExpected;
+        $_SERVER['ELECTRON_CDNURL'] = $cdnurlExpected;
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertSame($cdnurlExpected, $cdnurl);
 
         // Test $_ENV var overrides default URL, extra config and $_SERVER var
         $cdnurlExpected = 'scheme://host/env-var-url/';
-        $_ENV['PHANTOMJS_CDNURL'] = $cdnurlExpected;
+        $_ENV['ELECTRON_CDNURL'] = $cdnurlExpected;
         $cdnurl = $this->object->getCdnUrl($version);
         $this->assertSame($cdnurlExpected, $cdnurl);
     }
@@ -171,9 +174,9 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
         $this->assertTrue(is_string($os));
     }
 
-    public function testGetBitSize()
+    public function testGetArch()
     {
-        $bitsize = $this->object->getBitSize();
-        $this->assertTrue(is_string($bitsize));
+        $arch = $this->object->getArch();
+        $this->assertTrue(is_string($arch));
     }
 }
