@@ -5,9 +5,7 @@ namespace ElectronInstaller;
 use Composer\Composer;
 use Composer\Downloader\TransportException;
 use Composer\IO\IOInterface;
-use Composer\Package\Link;
 use Composer\Package\Package;
-use Composer\Package\RootPackageInterface;
 use Composer\Package\Version\VersionParser;
 use Composer\Script\Event;
 use Exception;
@@ -18,8 +16,6 @@ class Installer
     public const ELECTRON_NAME = 'Electron';
 
     public const ELECTRON_TARGETDIR = '/uuf6429/electron';
-
-    public const ELECTRON_CHMODE = 0770; // octal !
 
     public const PACKAGE_NAME = 'uuf6429/electron-installer';
 
@@ -80,51 +76,7 @@ class Installer
 
         // download the archive & install
         if ($this->download($targetDir, $version)) {
-            $os = $this->getOS();
-
-            switch ($os) {
-                case 'win32':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron.exe';
-                    break;
-
-                case 'linux':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron';
-                    break;
-
-                case 'darwin':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'Electron.app';
-                    break;
-
-                default:
-                    throw new RuntimeException('Can not detect Electron binary; OS "' . $os . '" not supported.');
-            }
-
-            if (!file_exists($binaryPath)) {
-                throw new RuntimeException('Can not detect Electron binary; file/path "' . $binaryPath . '" does not exist.');
-            }
-
-            @chmod($binaryPath, static::ELECTRON_CHMODE);
-
-            $this->generateElectronBinaryClass($binaryPath);
-        }
-    }
-
-    /**
-     * Get Electron application version. Equals running "electron -v" on the CLI.
-     *
-     * @param string $pathToBinary
-     * @return string|null Electron Version
-     */
-    public function getElectronVersionFromBinary(string $pathToBinary): ?string
-    {
-        try {
-            $cmd = escapeshellarg($pathToBinary) . ' -v';
-            exec($cmd, $stdout);
-            return $stdout[0];
-        } catch (Exception $e) {
-            $this->io->warning("Caught exception while checking Electron version:\n" . $e->getMessage());
-            $this->io->notice('Re-downloading Electron');
-            return null;
+            $this->copyElectronBinaryToBinFolder($targetDir, $electronBinary);
         }
     }
 
@@ -172,6 +124,25 @@ class Installer
     }
 
     /**
+     * Get Electron application version. Equals running "electron -v" on the CLI.
+     *
+     * @param string $pathToBinary
+     * @return string|null Electron Version
+     */
+    protected function getElectronVersionFromBinary(string $pathToBinary): ?string
+    {
+        try {
+            $cmd = escapeshellarg($pathToBinary) . ' -v';
+            exec($cmd, $stdout);
+            return $stdout[0];
+        } catch (Exception $e) {
+            $this->io->warning("Caught exception while checking Electron version:\n" . $e->getMessage());
+            $this->io->notice('Re-downloading Electron');
+            return null;
+        }
+    }
+
+    /**
      * Returns the Electron version number.
      *
      * Search order for version number:
@@ -182,7 +153,7 @@ class Installer
      *
      * @return string Version
      */
-    public function getVersion(): ?string
+    protected function getVersion(): ?string
     {
         $extraData = $this->composer->getPackage()->getExtra();
 
@@ -192,22 +163,43 @@ class Installer
             ?? $this->getLatestElectronVersion();
     }
 
-    /**
-     * Returns the version for the given package either from the "require" or "require-dev" packages array.
-     *
-     * @param RootPackageInterface $package
-     * @return string|null
-     * @throws RuntimeException
-     */
-    public function getRequiredVersion(RootPackageInterface $package): ?string
+    protected function copyElectronBinaryToBinFolder(string $sourceDir, string $targetFileName): void
     {
-        foreach (array($package->getRequires(), $package->getDevRequires()) as $requiredPackages) {
-            if (isset($requiredPackages[static::PACKAGE_NAME])) {
-                /** @var Link[] $requiredPackages */
-                return $requiredPackages[static::PACKAGE_NAME]->getPrettyConstraint();
-            }
+        static $sourceNames = [
+            'win32' => DIRECTORY_SEPARATOR . 'electron.exe',
+            'linux' => DIRECTORY_SEPARATOR . 'electron',
+            'darwin' => DIRECTORY_SEPARATOR . 'Electron.app',
+        ];
+
+        $binDir = dirname($targetFileName);
+        if (!is_dir($binDir) && !mkdir($binDir) && !is_dir($binDir)) {
+            throw new RuntimeException(sprintf('Directory "%s" was not created', $binDir));
         }
-        throw new RuntimeException('Can not determine required version of ' . static::PACKAGE_NAME);
+
+        $os = $this->getOS();
+
+        if (!isset($sourceNames[$os])) {
+            throw new RuntimeException("Can not find Electron binary; $os OS not supported.");
+        }
+
+        $sourceName = $sourceNames[$os];
+        if (file_exists($sourceDir . $sourceName)) {
+            throw new RuntimeException("Can not find Electron binary; file/path $sourceDir$sourceName does not exist.");
+        }
+
+        if ($os !== null) {
+            $tempTargetName = tempnam($binDir, 'electron_temp_');
+            copy($sourceDir . $sourceName, $tempTargetName);
+            chmod($tempTargetName, 0777 & ~umask());
+            rename($tempTargetName, $targetFileName);
+        }
+
+        if ($os === 'win32') {
+            // slash fix (not needed, but looks better on the generated php file)
+            $targetFileName = str_replace('/', '\\', $targetFileName);
+        }
+
+        $this->generateElectronBinaryClass($targetFileName);
     }
 
     protected function getElectronVersionsFromGithub(): array
@@ -270,7 +262,7 @@ class Installer
 
         $binary = $binDir . '/electron';
 
-        if ($os === 'windows') {
+        if ($os === 'win32') {
             // the suffix for binaries on Windows is ".exe"
             $binary .= '.exe';
         }
@@ -427,8 +419,8 @@ class Installer
         // binary      = full path to the binary
         // binary_dir  = the folder the binary resides in
         $fileContent = str_replace(
-            array('%binary%', '%binary_dir%'),
-            array($binaryPath, dirname($binaryPath)),
+            ['%binary%', '%binary_dir%'],
+            [$binaryPath, dirname($binaryPath)],
             $code
         );
 
@@ -522,6 +514,8 @@ class Installer
 
         switch (true) {
             case strpos($uname, 'darwin') !== false:
+            case strpos($uname, 'openbsd') !== false:
+            case strpos($uname, 'freebsd') !== false:
                 return 'darwin';
 
             case strpos($uname, 'win') !== false:

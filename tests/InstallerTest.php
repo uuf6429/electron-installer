@@ -129,7 +129,7 @@ class InstallerTest extends TestCase
         $expectedVersion = '1.0.0';
         $extraData = [Installer::PACKAGE_NAME => ['electron-version' => $expectedVersion]];
         $this->setUpForGetCdnUrl($extraData);
-        $version = $this->object->getVersion();
+        $version = $this->callProtectedMethod([$this->object, 'getVersion']);
         $this->assertSame($expectedVersion, $version);
     }
 
