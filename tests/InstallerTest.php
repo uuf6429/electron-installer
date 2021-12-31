@@ -9,6 +9,7 @@ use ElectronInstaller\ElectronBinary;
 use ElectronInstaller\Installer;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
 
 /**
  * @backupStaticAttributes enabled
@@ -47,7 +48,7 @@ class InstallerTest extends TestCase
         $binaryPath = __DIR__ . '/a_fake_electron_binary';
 
         // generate file
-        $this->assertTrue($this->object->dropClassWithPathToInstalledBinary($binaryPath));
+        $this->assertTrue($this->callProtectedMethod([$this->object, 'generateElectronBinaryClass'], $binaryPath));
         $this->assertTrue(is_file(dirname(__DIR__) . '/src/ElectronInstaller/ElectronBinary.php'));
 
         // test the generated file
@@ -65,8 +66,8 @@ class InstallerTest extends TestCase
         $version = '1.0.0';
         $configuredCdnUrl = 'scheme://host/path'; // without slash
         $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertRegExp('{(?:^|[^/])/$}', $cdnurl, 'CdnUrl should end with one slash.');
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertRegExp('{(?:^|[^/])/$}', $cdnUrl, 'CdnUrl should end with one slash.');
     }
 
     /**
@@ -80,14 +81,14 @@ class InstallerTest extends TestCase
         // Test rewrite for the GitHub url as documented
         $configuredCdnUrl = 'https://github.com/electron/electron';
         $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($configuredCdnUrl . '/releases/download/v' . $version . '/', $cdnurl);
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertSame($configuredCdnUrl . '/releases/download/v' . $version . '/', $cdnUrl);
 
         // Test that a longer url is not rewritten
         $configuredCdnUrl = 'https://github.com/electron/electron/releases/download/v1.9.19/';
         $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($configuredCdnUrl, $cdnurl);
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertSame($configuredCdnUrl, $cdnUrl);
     }
 
     /**
@@ -99,48 +100,55 @@ class InstallerTest extends TestCase
         $version = '1.0.0';
 
         // Test default URL is returned when there is no config
-        $cdnurlExpected = Installer::ELECTRON_CDNURL_DEFAULT;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertStringStartsWith($cdnurlExpected, $cdnurl);
+        $cdnUrlExpected = Installer::ELECTRON_CDNURL_DEFAULT;
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertStringStartsWith($cdnUrlExpected, $cdnUrl);
 
         // Test composer.json extra config overrides the default URL
-        $cdnurlExpected = 'scheme://host/extra-url/';
-        $extraData = [Installer::PACKAGE_NAME => ['cdnurl' => $cdnurlExpected]];
+        $cdnUrlExpected = 'scheme://host/extra-url/';
+        $extraData = [Installer::PACKAGE_NAME => ['cdnurl' => $cdnUrlExpected]];
         $this->setUpForGetCdnUrl($extraData);
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($cdnurlExpected, $cdnurl);
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertSame($cdnUrlExpected, $cdnUrl);
 
         // Test $_SERVER var overrides default URL and extra config
-        $cdnurlExpected = 'scheme://host/server-var-url/';
-        $_SERVER['ELECTRON_CDNURL'] = $cdnurlExpected;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($cdnurlExpected, $cdnurl);
+        $cdnUrlExpected = 'scheme://host/server-var-url/';
+        $_SERVER['ELECTRON_CDNURL'] = $cdnUrlExpected;
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertSame($cdnUrlExpected, $cdnUrl);
 
         // Test $_ENV var overrides default URL, extra config and $_SERVER var
-        $cdnurlExpected = 'scheme://host/env-var-url/';
-        $_ENV['ELECTRON_CDNURL'] = $cdnurlExpected;
-        $cdnurl = $this->object->getCdnUrl($version);
-        $this->assertSame($cdnurlExpected, $cdnurl);
+        $cdnUrlExpected = 'scheme://host/env-var-url/';
+        $_ENV['ELECTRON_CDNURL'] = $cdnUrlExpected;
+        $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+        $this->assertSame($cdnUrlExpected, $cdnUrl);
     }
 
     public function testGetURL(): void
     {
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
-        $url = $this->object->getURL($version);
+        $url = $this->callProtectedMethod([$this->object, 'getURL'], $version);
         $this->assertIsString($url);
     }
 
     public function testGetOS(): void
     {
-        $os = $this->object->getOS();
+        $os = $this->callProtectedMethod([$this->object, 'getOS']);
         $this->assertIsString($os);
     }
 
     public function testGetArch(): void
     {
-        $arch = $this->object->getArch();
+        $arch = $this->callProtectedMethod([$this->object, 'getArch']);
         $this->assertIsString($arch);
+    }
+
+    public function testGetElectronVersions(): void
+    {
+        $versions = $this->callProtectedMethod([$this->object, 'getElectronVersions']);
+        $this->assertIsArray($versions);
+        $this->assertContains('16.0.0', $versions); // test for some arbitrary version
     }
 
     protected function setUp(): void
@@ -175,5 +183,16 @@ class InstallerTest extends TestCase
         }
         $this->mockPackage = $this->getMockBuilder(RootPackageInterface::class)->getMock();
         $this->mockPackage->method('getExtra')->willReturn($extraConfig);
+    }
+
+    /**
+     * @noinspection PhpUnhandledExceptionInspection
+     */
+    private function callProtectedMethod(array $callback, ...$arguments)
+    {
+        $class = new ReflectionClass($callback[2] ?? $callback[0]);
+        $method = $class->getMethod($callback[1]);
+        $method->setAccessible(true);
+        return $method->invokeArgs(is_object($callback[0]) ? $callback[0] : null, $arguments);
     }
 }
