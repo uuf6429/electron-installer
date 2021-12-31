@@ -15,7 +15,7 @@
         }
     ],
     "require": {
-        "php": "^7",
+        "php": "^7.1",
         "ext-bz2": "*",
         "ext-json": "*",
         "ext-openssl": "*"

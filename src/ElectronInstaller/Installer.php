@@ -8,20 +8,17 @@ use Composer\IO\IOInterface;
 use Composer\Package\Package;
 use Composer\Package\Version\VersionParser;
 use Composer\Script\Event;
-use Exception;
 use RuntimeException;
+use Throwable;
 
 class Installer
 {
-    public const ELECTRON_NAME = 'Electron';
+    public const ELECTRON_NAME = 'electron';
 
     public const ELECTRON_TARGETDIR = '/uuf6429/electron';
 
     public const PACKAGE_NAME = 'uuf6429/electron-installer';
 
-    /**
-     * Default CDN URL
-     */
     public const ELECTRON_CDNURL_DEFAULT = 'https://github.com/electron/electron/';
 
     /** @var Composer */
@@ -29,6 +26,12 @@ class Installer
 
     /** @var IOInterface */
     protected $io;
+
+    protected $osSpecificFilenames = [
+        'win32' => DIRECTORY_SEPARATOR . 'electron.exe',
+        'linux' => DIRECTORY_SEPARATOR . 'electron',
+        'darwin' => DIRECTORY_SEPARATOR . 'Electron.app',
+    ];
 
     public function __construct(Composer $composer, IOInterface $io)
     {
@@ -50,12 +53,12 @@ class Installer
      */
     public static function installElectron(Event $event): void
     {
-        (new static($event->getComposer(), $event->getIO()))->__invoke();
+        (new static($event->getComposer(), $event->getIO()))->run();
     }
 
-    public function __invoke()
+    public function run(): void
     {
-        $version = $this->getVersion();
+        $requestedVersion = $this->getVersion();
 
         $config = $this->composer->getConfig();
 
@@ -64,19 +67,37 @@ class Installer
         // the installation folder depends on the vendor-dir (default prefix is './vendor')
         $targetDir = $config->get('vendor-dir') . static::ELECTRON_TARGETDIR;
 
-        // do not install a lower or equal version
-        $electronBinary = $this->getElectronBinary($binDir);
-        if ($electronBinary) {
-            $installedVersion = $this->getElectronVersionFromBinary($electronBinary);
-            if (version_compare($version, $installedVersion) !== 1) {
-                $this->io->write('   - Electron v' . $installedVersion . ' is already installed. Skipping the installation.');
+        // do not reinstall the same version
+        if (file_exists(__DIR__ . '/ElectronBinary.php') && file_exists($this->getElectronBinary())) {
+            $installedVersion = $this->getElectronVersionFromClass();
+            if (version_compare($requestedVersion, $installedVersion) === 0) {
+                $this->io->writeError("   - Skipping <info>".self::ELECTRON_NAME."</info> (<comment>$installedVersion</comment>): it is already installed");
                 return;
             }
         }
 
+        $os = $this->getOS();
+        if (!isset($this->osSpecificFilenames[$os])) {
+            throw new RuntimeException("Cannot install Electron binary; $os OS is not supported.");
+        }
+
         // download the archive & install
-        if ($this->download($targetDir, $version)) {
-            $this->copyElectronBinaryToBinFolder($targetDir, $electronBinary);
+        if ($this->download($targetDir, $requestedVersion)) {
+            $sourceName = $this->osSpecificFilenames[$os];
+            $sourceFileName = $targetDir . $sourceName;
+            if (!file_exists($sourceFileName)) {
+                throw new RuntimeException("Could not find Electron binary; file/path $sourceFileName does not exist.");
+            }
+            $targetFileName = $binDir . $sourceName;
+
+            $this->copyElectronBinaryToBin($sourceFileName, $targetFileName);
+
+            if ($os === 'win32') {
+                // slash fix (not needed, but looks better on the generated php file)
+                $targetFileName = str_replace('/', '\\', $targetFileName);
+            }
+
+            $this->generateElectronBinaryClass($targetFileName, $requestedVersion);
         }
     }
 
@@ -123,20 +144,18 @@ class Installer
         return $versions;
     }
 
-    /**
-     * Get Electron application version. Equals running "electron -v" on the CLI.
-     *
-     * @param string $pathToBinary
-     * @return string|null Electron Version
-     */
-    protected function getElectronVersionFromBinary(string $pathToBinary): ?string
+    protected function getElectronVersionFromClass(): ?string
     {
         try {
-            $cmd = escapeshellarg($pathToBinary) . ' -v';
+            $classFile = var_export(__DIR__ . '/ElectronBinary.php', true);
+            $cmd = 'php -r ' . escapeshellarg(/** @lang PHP */ "
+                include $classFile;
+                echo ElectronInstaller\ElectronBinary::VERSION;
+            ");
             exec($cmd, $stdout);
-            return $stdout[0];
-        } catch (Exception $e) {
-            $this->io->warning("Caught exception while checking Electron version:\n" . $e->getMessage());
+            return $stdout[0] ?? null;
+        } catch (Throwable $e) {
+            $this->io->warning("Caught exception while checking Electron version:\n{$e->getMessage()}");
             $this->io->notice('Re-downloading Electron');
             return null;
         }
@@ -151,9 +170,9 @@ class Installer
      *  3. composer.json extra section
      *  4. fallback to the latest version from {@see getElectronVersions}
      *
-     * @return string Version
+     * @return string
      */
-    protected function getVersion(): ?string
+    protected function getVersion(): string
     {
         $extraData = $this->composer->getPackage()->getExtra();
 
@@ -163,43 +182,16 @@ class Installer
             ?? $this->getLatestElectronVersion();
     }
 
-    protected function copyElectronBinaryToBinFolder(string $sourceDir, string $targetFileName): void
+    protected function copyElectronBinaryToBin(string $sourceFileName, string $targetFileName): void
     {
-        static $sourceNames = [
-            'win32' => DIRECTORY_SEPARATOR . 'electron.exe',
-            'linux' => DIRECTORY_SEPARATOR . 'electron',
-            'darwin' => DIRECTORY_SEPARATOR . 'Electron.app',
-        ];
-
         $binDir = dirname($targetFileName);
-        if (!is_dir($binDir) && !mkdir($binDir) && !is_dir($binDir)) {
+        if (!is_dir($binDir) && !mkdir($binDir, 0777, true) && !is_dir($binDir)) {
             throw new RuntimeException(sprintf('Directory "%s" was not created', $binDir));
         }
 
-        $os = $this->getOS();
-
-        if (!isset($sourceNames[$os])) {
-            throw new RuntimeException("Can not find Electron binary; $os OS not supported.");
-        }
-
-        $sourceName = $sourceNames[$os];
-        if (file_exists($sourceDir . $sourceName)) {
-            throw new RuntimeException("Can not find Electron binary; file/path $sourceDir$sourceName does not exist.");
-        }
-
-        if ($os !== null) {
-            $tempTargetName = tempnam($binDir, 'electron_temp_');
-            copy($sourceDir . $sourceName, $tempTargetName);
-            chmod($tempTargetName, 0777 & ~umask());
-            rename($tempTargetName, $targetFileName);
-        }
-
-        if ($os === 'win32') {
-            // slash fix (not needed, but looks better on the generated php file)
-            $targetFileName = str_replace('/', '\\', $targetFileName);
-        }
-
-        $this->generateElectronBinaryClass($targetFileName);
+        @unlink($targetFileName);
+        symlink($sourceFileName, $targetFileName);
+        chmod($targetFileName, 0777 & ~umask());
     }
 
     protected function getElectronVersionsFromGithub(): array
@@ -250,24 +242,11 @@ class Installer
         return null;
     }
 
-    /**
-     * Get path to Electron binary.
-     *
-     * @param string $binDir
-     * @return string|bool Returns false, if file not found, else filepath.
-     */
-    protected function getElectronBinary(string $binDir)
+    protected function getElectronBinary(): ?string
     {
-        $os = $this->getOS();
-
-        $binary = $binDir . '/electron';
-
-        if ($os === 'win32') {
-            // the suffix for binaries on Windows is ".exe"
-            $binary .= '.exe';
-        }
-
-        return realpath($binary);
+        $binDir = $this->composer->getConfig()->get('bin-dir');
+        $fileName = $this->osSpecificFilenames[$this->getOS()] ?? null;
+        return realpath($binDir . $fileName) ?: null;
     }
 
     /**
@@ -306,7 +285,7 @@ class Installer
             $message = $e->getMessage();
             $code = $e->getStatusCode();
             $this->io->error(PHP_EOL . "<error>TransportException (Status $code): $message</error>");
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $message = $e->getMessage();
             $this->io->error(PHP_EOL . "<error>Error while downloading version $targetVersion: $message</error>");
         }
@@ -379,52 +358,21 @@ class Installer
         return false;
     }
 
-    /**
-     * Drop php class with path to installed electron binary for easier usage.
-     *
-     * Usage:
-     *
-     * use ElectronInstaller\ElectronBinary;
-     *
-     * $bin = ElectronInstaller\ElectronBinary::BIN;
-     * $dir = ElectronInstaller\ElectronBinary::DIR;
-     *
-     * $bin = ElectronInstaller\ElectronBinary::getBin();
-     * $dir = ElectronInstaller\ElectronBinary::getDir();
-     *
-     * @param string $binaryPath full path to binary
-     *
-     * @return bool True, if file dropped. False, otherwise.
-     */
-    protected function generateElectronBinaryClass(string $binaryPath): bool
+    protected function generateElectronBinaryClass(string $binaryPath, string $version): void
     {
-        $code = "<?php\n";
-        $code .= "\n";
-        $code .= "namespace ElectronInstaller;\n";
-        $code .= "\n";
-        $code .= "class ElectronBinary\n";
-        $code .= "{\n";
-        $code .= "    public const BIN = '%binary%';\n";
-        $code .= "    public const DIR = '%binary_dir%';\n";
-        $code .= "\n";
-        $code .= "    public static function getBin() {\n";
-        $code .= "        return self::BIN;\n";
-        $code .= "    }\n";
-        $code .= "\n";
-        $code .= "    public static function getDir() {\n";
-        $code .= "        return self::DIR;\n";
-        $code .= "    }\n";
-        $code .= "}\n";
-
-        // binary      = full path to the binary
-        // binary_dir  = the folder the binary resides in
-        $fileContent = str_replace(
-            ['%binary%', '%binary_dir%'],
-            [$binaryPath, dirname($binaryPath)],
-            $code
+        file_put_contents(
+            __DIR__ . '/ElectronBinary.php',
+            "<?php\n" .
+            "\n" .
+            "namespace ElectronInstaller;\n" .
+            "\n" .
+            "class ElectronBinary\n" .
+            "{\n" .
+            "    public const BIN = " . var_export($binaryPath, true) . ";\n" .
+            "    public const DIR = " . var_export(dirname($binaryPath), true) . ";\n" .
+            "    public const VERSION = " . var_export($version, true) . ";\n" .
+            "}\n"
         );
-
-        return (bool)file_put_contents(__DIR__ . '/ElectronBinary.php', $fileContent);
     }
 
     /**
