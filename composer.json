@@ -17,6 +17,7 @@
     "require": {
         "php": "^7",
         "ext-bz2": "*",
+        "ext-json": "*",
         "ext-openssl": "*"
     },
     "require-dev": {

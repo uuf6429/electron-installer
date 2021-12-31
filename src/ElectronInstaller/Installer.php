@@ -220,7 +220,16 @@ class Installer
      */
     public function getElectronVersions(): array
     {
-        return ['1.6.2', '1.6.1', '1.4.15', '1.4.14', '1.4.13', '1.4.12'];
+        static $versions;
+        if (!$versions) {
+            $releases = (array)json_decode(file_get_contents('https://api.github.com/repos/electron/electron/releases'));
+            foreach ($releases as $release) {
+                $versions[] = ltrim($release->tag_name ?? '', 'v');
+            }
+            $versions = array_unique(array_filter($versions));
+        }
+
+        return $versions;
     }
 
     /**
