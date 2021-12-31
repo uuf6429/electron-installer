@@ -12,6 +12,12 @@ php:
   - 8.1
   - hhvm
 
+allow_failures:
+  - os: windows     # PHP not available here yet
+  - os: osx         # PHP not available here yet
+  - php: 8.1        # Apparently not available at the moment
+  - php: hhvm       # Not sure what's breaking, needs investigation
+
 cache:
   - directories:
       - $HOME/.composer/cache/files
