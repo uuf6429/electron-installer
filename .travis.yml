@@ -26,18 +26,18 @@ before_install:
   - composer install --no-interaction --prefer-source
 
 script:
-  - echo -en 'travis_fold:start:PHPUnit\\r'
+  - echo -en 'travis_fold:start:PHPUnit'
   - phpunit --configuration ./tests/phpunit.xml.dist
-  - echo -en 'travis_fold:end:PHPUnit\\r'
+  - echo -en 'travis_fold:end:PHPUnit'
 
-  - echo -en 'travis_fold:start:Install-Latest\\r'
+  - echo -en 'travis_fold:start:Install-Latest'
   - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version"
   - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
   - composer install -vvv --profile
-  - echo -en 'travis_fold:end:Install-Latest\\r'
+  - echo -en 'travis_fold:end:Install-Latest'
 
-  - echo -en 'travis_fold:start:Install-16.0.0\\r'
+  - echo -en 'travis_fold:start:Install-16.0.0'
   - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0"
   - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
   - composer install -vvv --profile
-  - echo -en 'travis_fold:end:Install-16.0.0\\r'
+  - echo -en 'travis_fold:end:Install-16.0.0'
