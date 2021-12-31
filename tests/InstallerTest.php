@@ -5,68 +5,44 @@ namespace ElectronInstaller\Test;
 use Composer\Composer;
 use Composer\IO\BaseIO;
 use Composer\Package\RootPackageInterface;
-use ElectronInstaller\Installer;
 use ElectronInstaller\ElectronBinary;
+use ElectronInstaller\Installer;
+use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
 
 /**
  * @backupStaticAttributes enabled
  */
-class InstallerTest extends \PHPUnit_Framework_TestCase
+class InstallerTest extends TestCase
 {
     /** @var Installer */
-    protected $object;
+    private $object;
 
-    protected $bakEnvVars = [];
+    private $bakEnvVars = [];
 
-    protected $bakServerVars = [];
-    
-    protected function setUp()
-    {
-        parent::setUp();
+    private $bakServerVars = [];
 
-        $mockComposer = $this->getMockComposer();
-        $mockIO = $this->getMockIO();
-        $this->object = new Installer($mockComposer, $mockIO);
+    /** @var Composer|MockObject */
+    private $mockComposer;
 
-        // Backup $_ENV and $_SERVER
-        $this->bakEnvVars = $_ENV;
-        $this->bakServerVars = $_SERVER;
-    }
+    /**
+     * @var null|RootPackageInterface|MockObject
+     */
+    private $mockPackage;
 
-    protected function tearDown()
-    {
-        // Restore $_ENV and $_SERVER
-        $_ENV = $this->bakEnvVars;
-        $_SERVER = $this->bakServerVars;
-    }
-
-    protected function getMockComposer()
-    {
-        $mockComposer = $this->getMockBuilder(Composer::class)->getMock();
-
-        return $mockComposer;
-    }
-
-    protected function getMockIO()
-    {
-        $mockIO = $this->getMockBuilder(BaseIO::class)->getMockForAbstractClass();
-
-        return $mockIO;
-    }
-
-    public function testInstallElectron()
+    public function testInstallElectron(): void
     {
         // composer testing: mocks.. for nothing
         //InstallElectron(Event $event)
         $this->markTestSkipped('contribute ?');
     }
 
-    public function testCopyElectronBinaryToBinFolder()
+    public function testCopyElectronBinaryToBinFolder(): void
     {
         $this->markTestSkipped('contribute ?');
     }
 
-    public function testDropClassWithPathToInstalledBinary()
+    public function testDropClassWithPathToInstalledBinary(): void
     {
         $binaryPath = __DIR__ . '/a_fake_electron_binary';
 
@@ -81,22 +57,9 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
     }
 
     /**
-     * @param array $extraConfig mock composer.json 'extra' config with this array
-     */
-    public function setUpForGetCdnUrl(array $extraConfig = [])
-    {
-        $object = $this->object;
-        $mockComposer = $this->getMockComposer();
-        $object->setComposer($mockComposer);
-        $mockPackage = $this->getMockBuilder(RootPackageInterface::class)->getMock();
-        $mockComposer->method('getPackage')->willReturn($mockPackage);
-        $mockPackage->method('getExtra')->willReturn($extraConfig);
-    }
-
-    /**
      * @backupGlobals
      */
-    public function testCdnUrlTrailingSlash()
+    public function testCdnUrlTrailingSlash(): void
     {
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
@@ -109,7 +72,7 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
     /**
      * @backupGlobals
      */
-    public function testSpecialGithubPatternForCdnUrl()
+    public function testSpecialGithubPatternForCdnUrl(): void
     {
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
@@ -130,7 +93,7 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
     /**
      * @backupGlobals
      */
-    public function testGetCdnUrlConfigPrecedence()
+    public function testGetCdnUrlConfigPrecedence(): void
     {
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
@@ -160,23 +123,57 @@ class InstallerTest extends \PHPUnit_Framework_TestCase
         $this->assertSame($cdnurlExpected, $cdnurl);
     }
 
-    public function testgetURL()
+    public function testGetURL(): void
     {
         $this->setUpForGetCdnUrl();
         $version = '1.0.0';
         $url = $this->object->getURL($version);
-        $this->assertTrue(is_string($url));
+        $this->assertIsString($url);
     }
 
-    public function testGetOS()
+    public function testGetOS(): void
     {
         $os = $this->object->getOS();
-        $this->assertTrue(is_string($os));
+        $this->assertIsString($os);
     }
 
-    public function testGetArch()
+    public function testGetArch(): void
     {
         $arch = $this->object->getArch();
-        $this->assertTrue(is_string($arch));
+        $this->assertIsString($arch);
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->mockComposer = $this->getMockBuilder(Composer::class)->getMock();
+        $mockIO = $this->getMockBuilder(BaseIO::class)->getMockForAbstractClass();
+        $this->object = new Installer($this->mockComposer, $mockIO);
+
+        // Backup $_ENV and $_SERVER
+        $this->bakEnvVars = $_ENV;
+        $this->bakServerVars = $_SERVER;
+    }
+
+    protected function tearDown(): void
+    {
+        // Restore $_ENV and $_SERVER
+        $_ENV = $this->bakEnvVars;
+        $_SERVER = $this->bakServerVars;
+    }
+
+    /**
+     * @param array $extraConfig mock composer.json 'extra' config with this array
+     */
+    private function setUpForGetCdnUrl(array $extraConfig = []): void
+    {
+        if (!$this->mockPackage) {
+            $this->mockComposer->method('getPackage')->willReturnCallback(function () {
+                return $this->mockPackage;
+            });
+        }
+        $this->mockPackage = $this->getMockBuilder(RootPackageInterface::class)->getMock();
+        $this->mockPackage->method('getExtra')->willReturn($extraConfig);
     }
 }
