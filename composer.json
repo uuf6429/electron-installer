@@ -21,7 +21,7 @@
         "ext-openssl": "*"
     },
     "require-dev": {
-        "composer/composer": "^2",
+        "composer/composer": "^1 || ^2",
         "phpunit/phpunit": "^8"
     },
     "autoload": {

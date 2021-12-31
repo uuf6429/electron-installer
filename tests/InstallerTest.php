@@ -124,6 +124,15 @@ class InstallerTest extends TestCase
         $this->assertSame($cdnUrlExpected, $cdnUrl);
     }
 
+    public function testGetVersionFromExtra(): void
+    {
+        $expectedVersion = '1.0.0';
+        $extraData = [Installer::PACKAGE_NAME => ['electron-version' => $expectedVersion]];
+        $this->setUpForGetCdnUrl($extraData);
+        $version = $this->object->getVersion();
+        $this->assertSame($expectedVersion, $version);
+    }
+
     public function testGetURL(): void
     {
         $this->setUpForGetCdnUrl();

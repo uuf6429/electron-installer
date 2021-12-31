@@ -24,7 +24,7 @@ To install Electron as a local, per-project dependency to your project, simply a
 ```json
 {
     "require": {
-        "uuf6429/electron-installer": "1.0.0"
+        "uuf6429/electron-installer": "^2"
     },
     "config": {
         "bin-dir": "bin"
@@ -55,19 +55,19 @@ will be installed into the `/bin` folder and updated alongside the project's Com
 
 ## How to require specific versions of Electron?
 
-1. The version number of the package specifies the Electron version. 
-   When you specify:
-    - `2.1.1-p07`: Composer fetches the 2.1.1-p07 tag of the installer. The installer fetches the 2.1.1 version of Electron.
-    - `2.1.1`: Composer fetches the 2.1.1 tag of the installer. The installer fetches the 2.1.1 version of Electron.
-    - `1.9.8`: Composer fetches the 1.9.8 tag of the installer. The installer fetches the 1.9.8 version of Electron. 
-      - This will also fetch an old installer tag. Please use the syntax for a version alias instead (see item 3 below).
-    - **Important! Please use exact versioning, e.g. `2.1.1-p07`. Do not use a wildcard or caret operator, e.g. `^2.1`, as this will not resolve to the latest patch level version.**
-2. If you specify `dev-master`, the latest version will be fetched.
-  - Composer fetches the latest version of the installer. The installer fetches the latest version of Electron.
-3. You might also specify the Electron version by using a version alias,  e.g. `dev-master as <version>`. 
-  - Composer fetches the latest version of the installer. The installer fetches `<version>` of Electron!
-4. If you specify an explicit commit reference  with a version alias, e.g. `dev-master#<commit-ref> as <version>`.
-  - Composer fetches a specific git commit of the installer. The installer fetches `<version>` of Electron!
+The environment and server variable `ELECTRON_VERSION` enables you specify the version requirement at the time of packaging.
+
+You can also set the `electron-version` in the `extra` section of your `composer.json`:
+
+ ```json
+  "extra": {
+    "uuf6429/electron-installer": {
+      "electron-version": "16.0.0"
+    }
+  }
+ ```
+
+The search order for the version is `$_ENV`, `$_SERVER`, `composer.json` (extra section), fallback to the latest version on GitHub.
 
 ## How does this work internally?
 
@@ -138,7 +138,7 @@ You can override the default download location of the Electron binary file by se
  ```json
   "extra": {
     "uuf6429/electron-installer": {
-      "cdnurl": "https://github.com/company/electron/releases/download/v1.0.0/"
+      "cdnurl": "https://github.com/company/electron/releases/download/v16.0.0/"
     }
   },
  ```

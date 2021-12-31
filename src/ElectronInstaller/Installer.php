@@ -174,54 +174,22 @@ class Installer
     /**
      * Returns the Electron version number.
      *
-     * Firstly, we search for a version number in the local repository,
-     * secondly, in the root package.
-     * A version specification of "dev-master#<commit-reference>" is disallowed.
+     * Search order for version number:
+     *  1. $_ENV
+     *  2. $_SERVER
+     *  3. composer.json extra section
+     *  4. fallback to the latest version from {@see getElectronVersions}
      *
      * @return string Version
      */
     public function getVersion(): ?string
     {
-        // try getting the version from the local repository
-        $version = null;
-        $packages = $this->composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages();
-        foreach ($packages as $package) {
-            if ($package->getName() === static::PACKAGE_NAME) {
-                $version = $package->getPrettyVersion();
-                break;
-            }
-        }
+        $extraData = $this->composer->getPackage()->getExtra();
 
-        // let's take a look at the aliases
-        $locker = $this->composer->getLocker();
-        $aliases = $locker ? $locker->getAliases() : [];
-        foreach ($aliases as $alias) {
-            if ($alias['package'] === static::PACKAGE_NAME) {
-                return $alias['alias'];
-            }
-        }
-
-        // fallback to the hardcoded latest version, if "dev-master" was set
-        if ($version === 'dev-master') {
-            return $this->getLatestElectronVersion();
-        }
-
-        // grab version from commit-reference, e.g. "dev-master#<commit-ref> as version"
-        if (preg_match('/dev-master#.*(\d.\d.\d)/i', $version, $matches)) {
-            return $matches[1];
-        }
-
-        // grab version from a Composer patch version tag with a patch level, like "1.9.8-p02"
-        if (preg_match('/(\d.\d.\d)(?:-p\d{2})?/i', $version, $matches)) {
-            return $matches[1];
-        }
-
-        // let's take a look at the root package
-        if (!empty($version)) {
-            $version = $this->getRequiredVersion($this->composer->getPackage());
-        }
-
-        return $version;
+        return $_ENV['ELECTRON_VERSION']
+            ?? $_SERVER['ELECTRON_VERSION']
+            ?? $extraData[static::PACKAGE_NAME]['electron-version']
+            ?? $this->getLatestElectronVersion();
     }
 
     /**
@@ -319,10 +287,41 @@ class Installer
      * when the resource it not found (404).
      *
      * @param string $targetDir
-     * @param string $targetVersion
+     * @param string $version
      * @return boolean
      */
-    protected function download(string $targetDir, string $targetVersion): bool
+    protected function download(string $targetDir, string $version): bool
+    {
+        if (defined('Composer\Composer::RUNTIME_API_VERSION') && version_compare(Composer::RUNTIME_API_VERSION, '2.0', '<')) {
+            return $this->downloadUsingComposerVersion1($targetDir, $version);
+        }
+
+        return $this->downloadUsingComposerVersion2($targetDir, $version);
+    }
+
+    protected function tryDownload(callable $callback, string $targetVersion): array
+    {
+        try {
+            $callback();
+            return [true, null];
+        } catch (TransportException $e) {
+            if ($e->getStatusCode() === 404) {
+                $retryVersion = $this->getLowerVersion($targetVersion);
+                $this->io->warning("Retrying the download with a lower version number: $retryVersion");
+                return [false, $retryVersion];
+            }
+
+            $message = $e->getMessage();
+            $code = $e->getStatusCode();
+            $this->io->error(PHP_EOL . "<error>TransportException (Status $code): $message</error>");
+        } catch (Exception $e) {
+            $message = $e->getMessage();
+            $this->io->error(PHP_EOL . "<error>Error while downloading version $targetVersion: $message</error>");
+        }
+        return [false, null];
+    }
+
+    protected function downloadUsingComposerVersion1(string $targetDir, string $targetVersion): bool
     {
         $downloadManager = $this->composer->getDownloadManager();
         $retries = count($this->getElectronVersions());
@@ -330,24 +329,59 @@ class Installer
         while ($retries--) {
             $package = $this->createComposerInMemoryPackage($targetDir, $targetVersion);
 
-            try {
-                $downloadManager->download($package, $targetDir);
-                return true;
-            } catch (TransportException $e) {
-                if ($e->getStatusCode() === 404) {
-                    $version = $this->getLowerVersion($targetVersion);
-                    $this->io->warning('Retrying the download with a lower version number: "' . $version . '"');
-                } else {
-                    $message = $e->getMessage();
-                    $code = $e->getStatusCode();
-                    $this->io->error(PHP_EOL . "<error>TransportException: $message. HTTP status code: $code</error>");
-                    return false;
-                }
-            } catch (Exception $e) {
-                $message = $e->getMessage();
-                $this->io->error(PHP_EOL . "<error>While downloading version $targetVersion the following error occurred: $message</error>");
-                return false;
+            [$success, $retryVersion] = $this->tryDownload(
+                static function () use ($targetDir, $package, $downloadManager) {
+                    $downloadManager->download($package, $targetDir);
+                },
+                $targetVersion
+            );
+
+            if ($retryVersion === null) {
+                return $success;
             }
+
+            $targetVersion = $retryVersion;
+        }
+
+        return false;
+    }
+
+    protected function downloadUsingComposerVersion2(string $targetDir, string $targetVersion): bool
+    {
+        $downloadManager = $this->composer->getDownloadManager();
+        $retries = count($this->getElectronVersions());
+
+        while ($retries--) {
+            $package = $this->createComposerInMemoryPackage($targetDir, $targetVersion);
+
+            [$success, $retryVersion] = $this->tryDownload(
+                function () use ($targetDir, $package, $downloadManager) {
+                    $loop = $this->composer->getLoop();
+                    $promise = $downloadManager->download($package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->prepare('install', $package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->install($package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->cleanup('install', $package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                },
+                $targetVersion
+            );
+
+            if ($retryVersion === null) {
+                return $success;
+            }
+
+            $targetVersion = $retryVersion;
         }
 
         return false;
