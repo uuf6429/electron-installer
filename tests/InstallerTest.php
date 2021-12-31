@@ -46,15 +46,17 @@ class InstallerTest extends TestCase
     public function testDropClassWithPathToInstalledBinary(): void
     {
         $binaryPath = __DIR__ . '/a_fake_electron_binary';
+        $version = '1.2.3';
 
         // generate file
-        $this->assertTrue($this->callProtectedMethod([$this->object, 'generateElectronBinaryClass'], $binaryPath));
-        $this->assertTrue(is_file(dirname(__DIR__) . '/src/ElectronInstaller/ElectronBinary.php'));
+        $this->callProtectedMethod([$this->object, 'generateElectronBinaryClass'], $binaryPath, $version);
 
         // test the generated file
-        require_once dirname(__DIR__) . '/src/ElectronInstaller/ElectronBinary.php';
+        $this->assertFileExists(__DIR__ . '/../src/ElectronInstaller/ElectronBinary.php');
+        require_once __DIR__ . '/../src/ElectronInstaller/ElectronBinary.php';
         $this->assertSame($binaryPath, ElectronBinary::BIN);
         $this->assertSame(dirname($binaryPath), ElectronBinary::DIR);
+        $this->assertSame($version, ElectronBinary::VERSION);
     }
 
     /**
@@ -66,7 +68,9 @@ class InstallerTest extends TestCase
         $version = '1.0.0';
         $configuredCdnUrl = 'scheme://host/path'; // without slash
         $_ENV['ELECTRON_CDNURL'] = $configuredCdnUrl;
+
         $cdnUrl = $this->callProtectedMethod([$this->object, 'getCdnUrl'], $version);
+
         $this->assertRegExp('{(?:^|[^/])/$}', $cdnUrl, 'CdnUrl should end with one slash.');
     }
 
