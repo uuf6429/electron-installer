@@ -23,19 +23,22 @@ cache:
 
 before_install:
   - composer self-update
-  - composer install --no-interaction --prefer-source
+  - composer install --no-interaction --prefer-dist
 
 script:
+  - echo Run PHPUnit Tests
   - echo -en 'travis_fold:start:PHPUnit'
   - phpunit --configuration ./tests/phpunit.xml.dist
   - echo -en 'travis_fold:end:PHPUnit'
 
+  - echo Install Latest Binary with Composer
   - echo -en 'travis_fold:start:Install-Latest'
   - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version"
   - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
   - composer install -vvv --profile
   - echo -en 'travis_fold:end:Install-Latest'
 
+  - echo Install v16.0.0 Binary with Composer
   - echo -en 'travis_fold:start:Install-16.0.0'
   - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0"
   - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
