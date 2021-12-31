@@ -1,24 +1,38 @@
 language: php
 
-sudo: false
+os:
+  - linux
+  - windows
+  - osx
+
+php:
+  - 7.2
+  - 7.4
+  - 8.0
+  - 8.1
+  - hhvm
 
 cache:
   - directories:
       - $HOME/.composer/cache/files
-
-php: [ 7.2, 7.4, 8.0, 8.1, hhvm ]
 
 before_install:
   - composer self-update
   - composer install --no-interaction --prefer-source
 
 script:
+  - echo 'travis_fold:start:PHPUnit'
   - phpunit --configuration ./tests/phpunit.xml.dist
-  # Test dev-master install
-  - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version" && composer install -vvv --profile
-  #- ls -ashF bin
-  #- bin/electron -v
-  # Test v16.0.0 install
-  - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0" && composer install -vvv --profile
-  #- ls -ashF bin
-  #- bin/electron -v
+  - echo 'travis_fold:end:PHPUnit'
+
+  - echo 'travis_fold:start:Install-Latest'
+  - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version"
+  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - composer install -vvv --profile
+  - echo 'travis_fold:end:Install-Latest'
+
+  - echo 'travis_fold:start:Install-16.0.0'
+  - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0"
+  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - composer install -vvv --profile
+  - echo 'travis_fold:end:Install-16.0.0'
