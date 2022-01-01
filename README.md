@@ -26,9 +26,6 @@ on `uuf6429/electron-installer` to your project's `composer.json` file.
   "require": {
     "uuf6429/electron-installer": "^2"
   },
-  "config": {
-    "bin-dir": "bin"
-  },
   "scripts": {
     "post-install-cmd": [
       "ElectronInstaller\\Installer::installElectron"
@@ -79,22 +76,22 @@ on GitHub.
 
 ## How does this work internally?
 
-1. **Fetching the Electron Installer**
+### Fetching the Electron Installer
 
 In your composer.json you require the package "electron-installer". The package is fetched by composer and stored
 into `./vendor/uuf6429/electron-installer`. It contains only one file the `ElectronInstaller\\Installer`.
 
-2. **Platform-specific download of Electron**
+### Platform-specific download of Electron
 
 The `ElectronInstaller\\Installer` is run as a "post-install-cmd". That's why you need the "scripts" section in your "
 composer.json". The installer creates a new composer in-memory package "electron", detects your OS and downloads the
 correct Electron version to the folder `./vendor/uuf6429/electron`. All Electron files reside there.
 
-3. **Installation into `/bin` folder**
+### Installation into `/bin` folder
 
 The binary is linked from `./vendor/uuf6429/electron` to your composer configured `bin-dir` folder.
 
-4. **Generation of ElectronBinary**
+### Generation of ElectronBinary
 
 The installer generates a PHP file `ElectronInstaller/ElectronBinary` and inserts the path to the binary.
 
@@ -133,12 +130,11 @@ Possible values for
 
 ## Downloading from a mirror
 
-You can override the default download location of the Electron binary file by setting it in one of these locations.
-Listed in order of precedence (highest first):
+You can override the default download location of the Electron binary file by setting it in one of these locations:
 
-* The environment variable `ELECTRON_CDNURL`
-* The server variable `ELECTRON_CDNURL`
-* In your `composer.json` by using `$['extra']['uuf6429/electron-installer']['cdnurl']`:
+- The environment variable `ELECTRON_CDNURL`
+- The server variable `ELECTRON_CDNURL`
+- In your `composer.json` by using `$['extra']['uuf6429/electron-installer']['cdnurl']`:
 
  ```json
 {
@@ -153,11 +149,17 @@ Listed in order of precedence (highest first):
 **Default Download Location**
 
 The default download location is GitHub: `https://github.com/electron/electron/releases/`. You don't need to set it
-explicitly. It's used, when `ELECTRON_CDNURL` is not set.
+explicitly. It's used when `ELECTRON_CDNURL` is not set.
 
 ## Automatic download retrying with version lowering on 404
 
 In case downloading an archive fails with HttpStatusCode 404 (resource not found), the downloader will automatically
-lower the version to the next available version and retry. The number of retries is determined by the number of
-hardcoded Electron versions in `getElectronVersions()`. This feature was added, because of the problems with v2.0.0 not
-being available for all platforms (see issue #25).
+lower the version to the next available version and retry.
+
+A couple of notes on this behaviour:
+
+- The number of retries is determined by the number of Electron versions in `getElectronVersions()`.
+- Since you can only request one specific version, it is possible to fall back to a very old version, if all others
+  failed for some reason.
+- On the next composer update/install, it will go through this process again. Therefore, it is possible that having a
+  lot of broken versions could slow the installation process.
