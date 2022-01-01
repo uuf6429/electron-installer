@@ -4,226 +4,101 @@ namespace ElectronInstaller;
 
 use Composer\Composer;
 use Composer\Downloader\TransportException;
-use Composer\IO\BaseIO as IO;
-use Composer\Package\Link;
+use Composer\IO\IOInterface;
 use Composer\Package\Package;
-use Composer\Package\RootPackageInterface;
 use Composer\Package\Version\VersionParser;
 use Composer\Script\Event;
+use RuntimeException;
+use Throwable;
 
 class Installer
 {
-    const ELECTRON_NAME = 'Electron';
+    public const ELECTRON_NAME = 'electron';
 
-    const ELECTRON_TARGETDIR = '/uuf6429/electron';
+    public const ELECTRON_TARGETDIR = '/uuf6429/electron';
 
-    const ELECTRON_CHMODE = 0770; // octal !
+    public const PACKAGE_NAME = 'uuf6429/electron-installer';
 
-    const PACKAGE_NAME = 'uuf6429/electron-installer';
+    public const ELECTRON_CDNURL_DEFAULT = 'https://github.com/electron/electron/';
 
     /** @var Composer */
     protected $composer;
 
-    /** @var IO */
+    /** @var IOInterface */
     protected $io;
 
-    /**
-     * @return Composer
-     */
-    public function getComposer()
-    {
-        return $this->composer;
-    }
+    protected $osSpecificFilenames = [
+        'win32' => DIRECTORY_SEPARATOR . 'electron.exe',
+        'linux' => DIRECTORY_SEPARATOR . 'electron',
+        'darwin' => DIRECTORY_SEPARATOR . 'Electron.app',
+    ];
 
-    /**
-     * @param Composer $composer
-     * @return static
-     */
-    public function setComposer(Composer $composer)
+    public function __construct(Composer $composer, IOInterface $io)
     {
         $this->composer = $composer;
-        return $this;
-    }
-
-    /**
-     * @return IO
-     */
-    public function getIO()
-    {
-        return $this->io;
-    }
-
-    /**
-     * @param IO $io
-     * @return static
-     */
-    public function setIO(IO $io)
-    {
         $this->io = $io;
-        return $this;
-    }
-
-    public function __construct(Composer $composer, IO $io)
-    {
-        $this->setComposer($composer);
-        $this->setIO($io);
     }
 
     /**
-     * installElectron is the main function of the install script.
+     * installElectron is the main function of the install-script.
      *
      * It installs Electron into the defined /bin folder,
-     * taking operating system dependend archives into account.
+     * taking operating system dependent archives into account.
      *
-     * You need to invoke it from the scripts section of your
+     * You need to invoke it from the "scripts" section of your
      * "composer.json" file as "post-install-cmd" or "post-update-cmd".
      *
      * @param Event $event
+     * @api
      */
-    public static function installElectron(Event $event)
+    public static function installElectron(Event $event): void
     {
-        $installer = new static($event->getComposer(), $event->getIO());
-        return $installer->__invoke();
+        (new static($event->getComposer(), $event->getIO()))->run();
     }
 
-    public function __invoke()
+    public function run(): void
     {
-        $version = $this->getVersion();
+        $requestedVersion = $this->getVersion();
 
-        $config = $this->getComposer()->getConfig();
+        $config = $this->composer->getConfig();
 
         $binDir = $config->get('bin-dir');
 
         // the installation folder depends on the vendor-dir (default prefix is './vendor')
         $targetDir = $config->get('vendor-dir') . static::ELECTRON_TARGETDIR;
 
-        $io = $this->getIO();
-
-        // do not install a lower or equal version
-        $electronBinary = $this->getElectronBinary($binDir);
-        if ($electronBinary) {
-            $installedVersion = $this->getElectronVersionFromBinary($electronBinary);
-            if (version_compare($version, $installedVersion) !== 1) {
-                $io->write('   - Electron v' . $installedVersion . ' is already installed. Skipping the installation.');
+        // do not reinstall the same version
+        if (file_exists(__DIR__ . '/ElectronBinary.php') && file_exists($this->getElectronBinary())) {
+            $installedVersion = $this->getElectronVersionFromClass();
+            if (version_compare($requestedVersion, $installedVersion) === 0) {
+                $this->io->writeError("   - Skipping <info>".self::ELECTRON_NAME."</info> (<comment>$installedVersion</comment>): it is already installed");
                 return;
             }
         }
 
-        // download the archive & install
-        if ($this->download($targetDir, $version)) {
-            $os = $this->getOS();
-
-            switch ($os) {
-                case 'win32':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron.exe';
-                    break;
-
-                case 'linux':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'electron';
-                    break;
-
-                case 'darwin':
-                    $binaryPath = $targetDir . DIRECTORY_SEPARATOR . 'Electron.app';
-                    break;
-
-                default:
-                    throw new \RuntimeException('Can not detect Electron binary; OS "' . $os . '" not supported.');
-            }
-
-            if (!file_exists($binaryPath)) {
-                throw new \RuntimeException('Can not detect Electron binary; file/path "' . $binaryPath . '" does not exist.');
-            }
-
-            @chmod($binaryPath, static::ELECTRON_CHMODE);
-
-            $this->dropClassWithPathToInstalledBinary($binaryPath);
-        }
-    }
-
-    /**
-     * Get Electron application version. Equals running "electron -v" on the CLI.
-     *
-     * @param string $pathToBinary
-     * @return string Electron Version
-     */
-    public function getElectronVersionFromBinary($pathToBinary)
-    {
-        $io = $this->getIO();
-
-        try {
-            $cmd = escapeshellarg($pathToBinary) . ' -v';
-            exec($cmd, $stdout);
-            $version = $stdout[0];
-            return $version;
-        } catch (\Exception $e) {
-            $io->warning("Caught exception while checking Electron version:\n" . $e->getMessage());
-            $io->notice('Re-downloading Electron');
-            return false;
-        }
-    }
-
-    /**
-     * Get path to Electron binary.
-     *
-     * @param string $binDir
-     * @return string|bool Returns false, if file not found, else filepath.
-     */
-    public function getElectronBinary($binDir)
-    {
         $os = $this->getOS();
-
-        $binary = $binDir . '/electron';
-
-        if ($os === 'windows') {
-            // the suffix for binaries on windows is ".exe"
-            $binary .= '.exe';
+        if (!isset($this->osSpecificFilenames[$os])) {
+            throw new RuntimeException("Cannot install Electron binary; $os OS is not supported.");
         }
 
-        return realpath($binary);
-    }
-
-    /**
-     * The main download function.
-     *
-     * The package to download is created on the fly.
-     * For downloading Composer\DownloadManager is used.
-     * Downloads are automatically retried with a lower version number,
-     * when the resource it not found (404).
-     *
-     * @param string $targetDir
-     * @param string $version
-     * @return boolean
-     */
-    public function download($targetDir, $version)
-    {
-        $io = $this->getIO();
-        $downloadManager = $this->getComposer()->getDownloadManager();
-        $retries = count($this->getElectronVersions());
-
-        while ($retries--) {
-            $package = $this->createComposerInMemoryPackage($targetDir, $version);
-
-            try {
-                $downloadManager->download($package, $targetDir, false);
-                return true;
-            } catch (TransportException $e) {
-                if ($e->getStatusCode() === 404) {
-                    $version = $this->getLowerVersion($version);
-                    $io->warning('Retrying the download with a lower version number: "' . $version . '"');
-                } else {
-                    $message = $e->getMessage();
-                    $code = $e->getStatusCode();
-                    $io->error(PHP_EOL . '<error>TransportException: "' . $message . '". HTTP status code: ' . $code . '</error>');
-                    return false;
-                }
-            } catch (\Exception $e) {
-                $message = $e->getMessage();
-                $io->error(PHP_EOL . '<error>While downloading version ' . $version . ' the following error occurred: ' . $message . '</error>');
-                return false;
+        // download the archive & install
+        if ($this->download($targetDir, $requestedVersion)) {
+            $sourceName = $this->osSpecificFilenames[$os];
+            $sourceFileName = $targetDir . $sourceName;
+            if (!file_exists($sourceFileName)) {
+                throw new RuntimeException("Could not find Electron binary; file/path $sourceFileName does not exist.");
             }
-        }
+            $targetFileName = $binDir . $sourceName;
 
-        return false;
+            $this->copyElectronBinaryToBin($sourceFileName, $targetFileName);
+
+            if ($os === 'win32') {
+                // slash fix (not needed, but looks better on the generated php file)
+                $targetFileName = str_replace('/', '\\', $targetFileName);
+            }
+
+            $this->generateElectronBinaryClass($targetFileName, $requestedVersion);
+        }
     }
 
     /**
@@ -233,7 +108,7 @@ class Installer
      * @param string $version
      * @return Package
      */
-    public function createComposerInMemoryPackage($targetDir, $version)
+    public function createComposerInMemoryPackage(string $targetDir, string $version): Package
     {
         $url = $this->getURL($version);
 
@@ -254,9 +129,87 @@ class Installer
      *
      * @return array Electron version numbers
      */
-    public function getElectronVersions()
+    public function getElectronVersions(): array
     {
-        return array('1.6.2', '1.6.1', '1.4.15', '1.4.14', '1.4.13', '1.4.12');
+        static $versions = null;
+
+        if ($versions === null) {
+            // TODO allow using a custom version provider
+            $versions = $this->getElectronVersionsFromGithub();
+            $versions = array_unique(array_filter($versions));
+            usort($versions, 'version_compare');
+            $versions = array_reverse($versions);
+        }
+
+        return $versions;
+    }
+
+    protected function getElectronVersionFromClass(): ?string
+    {
+        try {
+            $classFile = var_export(__DIR__ . '/ElectronBinary.php', true);
+            $cmd = 'php -r ' . escapeshellarg(/** @lang PHP */ "
+                include $classFile;
+                echo ElectronInstaller\ElectronBinary::VERSION;
+            ");
+            exec($cmd, $stdout);
+            return $stdout[0] ?? null;
+        } catch (Throwable $e) {
+            $this->io->warning("Caught exception while checking Electron version:\n{$e->getMessage()}");
+            $this->io->notice('Re-downloading Electron');
+            return null;
+        }
+    }
+
+    /**
+     * Returns the Electron version number.
+     *
+     * Search order for version number:
+     *  1. $_ENV
+     *  2. $_SERVER
+     *  3. composer.json extra section
+     *  4. fallback to the latest version from {@see getElectronVersions}
+     *
+     * @return string
+     */
+    protected function getVersion(): string
+    {
+        $extraData = $this->composer->getPackage()->getExtra();
+
+        return $_ENV['ELECTRON_VERSION']
+            ?? $_SERVER['ELECTRON_VERSION']
+            ?? $extraData[static::PACKAGE_NAME]['electron-version']
+            ?? $this->getLatestElectronVersion();
+    }
+
+    protected function copyElectronBinaryToBin(string $sourceFileName, string $targetFileName): void
+    {
+        $binDir = dirname($targetFileName);
+        if (!is_dir($binDir) && !mkdir($binDir, 0777, true) && !is_dir($binDir)) {
+            throw new RuntimeException(sprintf('Directory "%s" was not created', $binDir));
+        }
+
+        @unlink($targetFileName);
+        symlink($sourceFileName, $targetFileName);
+        chmod($targetFileName, 0777 & ~umask());
+    }
+
+    protected function getElectronVersionsFromGithub(): array
+    {
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "User-Agent: PHP/file_get_contents\r\n"
+            ]
+        ]);
+        $data = file_get_contents('https://api.github.com/repos/electron/electron/releases', false, $ctx);
+
+        $versions = [];
+        $releases = (array)json_decode($data, false);
+        foreach ($releases as $release) {
+            $versions[] = ltrim($release->tag_name ?? '', 'v');
+        }
+        return $versions;
     }
 
     /**
@@ -264,7 +217,7 @@ class Installer
      *
      * @return string Latest Electron Version.
      */
-    public function getLatestElectronVersion()
+    protected function getLatestElectronVersion(): string
     {
         $versions = $this->getElectronVersions();
 
@@ -274,14 +227,14 @@ class Installer
     /**
      * Returns a lower version for a version number.
      *
-     * @param string $old_version Version number
+     * @param string $oldVersion Version number
      * @return string Lower version number.
      */
-    public function getLowerVersion($old_version)
+    protected function getLowerVersion(string $oldVersion): ?string
     {
-        foreach ($this->getElectronVersions() as $idx => $version) {
+        foreach ($this->getElectronVersions() as $version) {
             // if $old_version is bigger than $version from versions array, return $version
-            if (version_compare($old_version, $version) == 1) {
+            if (version_compare($oldVersion, $version) === 1) {
                 return $version;
             }
         }
@@ -289,124 +242,137 @@ class Installer
         return null;
     }
 
-    /**
-     * Returns the Electron version number.
-     *
-     * Firstly, we search for a version number in the local repository,
-     * secondly, in the root package.
-     * A version specification of "dev-master#<commit-reference>" is disallowed.
-     *
-     * @return string $version Version
-     */
-    public function getVersion()
+    protected function getElectronBinary(): ?string
     {
-        $composer = $this->getComposer();
-
-        // try getting the version from the local repository
-        $version = null;
-        $packages = $composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages();
-        foreach ($packages as $package) {
-            if ($package->getName() === static::PACKAGE_NAME) {
-                $version = $package->getPrettyVersion();
-                break;
-            }
-        }
-
-        // let's take a look at the aliases
-        $aliases = $composer->getLocker()->getAliases();
-        foreach ($aliases as $idx => $alias) {
-            if ($alias['package'] === static::PACKAGE_NAME) {
-                return $alias['alias'];
-            }
-        }
-
-        // fallback to the hardcoded latest version, if "dev-master" was set
-        if ($version === 'dev-master') {
-            return $this->getLatestElectronVersion();
-        }
-
-        // grab version from commit-reference, e.g. "dev-master#<commit-ref> as version"
-        if (preg_match('/dev-master#(?:.*)(\d.\d.\d)/i', $version, $matches)) {
-            return $matches[1];
-        }
-
-        // grab version from a Composer patch version tag with a patch level, like "1.9.8-p02"
-        if (preg_match('/(\d.\d.\d)(?:(?:-p\d{2})?)/i', $version, $matches)) {
-            return $matches[1];
-        }
-
-        // let's take a look at the root package
-        if (!empty($version)) {
-            $version = $this->getRequiredVersion($composer->getPackage());
-        }
-
-        return $version;
+        $binDir = $this->composer->getConfig()->get('bin-dir');
+        $fileName = $this->osSpecificFilenames[$this->getOS()] ?? null;
+        return realpath($binDir . $fileName) ?: null;
     }
 
     /**
-     * Returns the version for the given package either from the "require" or "require-dev" packages array.
+     * The main download function.
      *
-     * @param RootPackageInterface $package
-     * @throws \RuntimeException
-     * @return mixed
+     * The package to download is created on the fly.
+     * For downloading Composer\DownloadManager is used.
+     * Downloads are automatically retried with a lower version number,
+     * when the resource it not found (404).
+     *
+     * @param string $targetDir
+     * @param string $version
+     * @return boolean
      */
-    public function getRequiredVersion(RootPackageInterface $package)
+    protected function download(string $targetDir, string $version): bool
     {
-        foreach (array($package->getRequires(), $package->getDevRequires()) as $requiredPackages) {
-            if (isset($requiredPackages[static::PACKAGE_NAME])) {
-                /** @var Link[] $requiredPackages */
-                return $requiredPackages[static::PACKAGE_NAME]->getPrettyConstraint();
-            }
+        if (defined('Composer\Composer::RUNTIME_API_VERSION') && version_compare(Composer::RUNTIME_API_VERSION, '2.0', '<')) {
+            return $this->downloadUsingComposerVersion1($targetDir, $version);
         }
-        throw new \RuntimeException('Can not determine required version of ' . static::PACKAGE_NAME);
+
+        return $this->downloadUsingComposerVersion2($targetDir, $version);
     }
 
-    /**
-     * Drop php class with path to installed electron binary for easier usage.
-     *
-     * Usage:
-     *
-     * use ElectronInstaller\ElectronBinary;
-     *
-     * $bin = ElectronInstaller\ElectronBinary::BIN;
-     * $dir = ElectronInstaller\ElectronBinary::DIR;
-     *
-     * $bin = ElectronInstaller\ElectronBinary::getBin();
-     * $dir = ElectronInstaller\ElectronBinary::getDir();
-     *
-     * @param  string $binaryPath full path to binary
-     *
-     * @return bool True, if file dropped. False, otherwise.
-     */
-    public function dropClassWithPathToInstalledBinary($binaryPath)
+    protected function tryDownload(callable $callback, string $targetVersion): array
     {
-        $code = "<?php\n";
-        $code .= "\n";
-        $code .= "namespace ElectronInstaller;\n";
-        $code .= "\n";
-        $code .= "class ElectronBinary\n";
-        $code .= "{\n";
-        $code .= "    const BIN = '%binary%';\n";
-        $code .= "    const DIR = '%binary_dir%';\n";
-        $code .= "\n";
-        $code .= "    public static function getBin() {\n";
-        $code .= "        return self::BIN;\n";
-        $code .= "    }\n";
-        $code .= "\n";
-        $code .= "    public static function getDir() {\n";
-        $code .= "        return self::DIR;\n";
-        $code .= "    }\n";
-        $code .= "}\n";
+        try {
+            $callback();
+            return [true, null];
+        } catch (TransportException $e) {
+            if ($e->getStatusCode() === 404) {
+                $retryVersion = $this->getLowerVersion($targetVersion);
+                $this->io->warning("Retrying the download with a lower version number: $retryVersion");
+                return [false, $retryVersion];
+            }
 
-        // binary      = full path to the binary
-        // binary_dir  = the folder the binary resides in
-        $fileContent = str_replace(
-            array('%binary%', '%binary_dir%'),
-            array($binaryPath, dirname($binaryPath)),
-            $code
+            $message = $e->getMessage();
+            $code = $e->getStatusCode();
+            $this->io->error(PHP_EOL . "<error>TransportException (Status $code): $message</error>");
+        } catch (Throwable $e) {
+            $message = $e->getMessage();
+            $this->io->error(PHP_EOL . "<error>Error while downloading version $targetVersion: $message</error>");
+        }
+        return [false, null];
+    }
+
+    protected function downloadUsingComposerVersion1(string $targetDir, string $targetVersion): bool
+    {
+        $downloadManager = $this->composer->getDownloadManager();
+        $retries = count($this->getElectronVersions());
+
+        while ($retries--) {
+            $package = $this->createComposerInMemoryPackage($targetDir, $targetVersion);
+
+            [$success, $retryVersion] = $this->tryDownload(
+                static function () use ($targetDir, $package, $downloadManager) {
+                    $downloadManager->download($package, $targetDir);
+                },
+                $targetVersion
+            );
+
+            if ($retryVersion === null) {
+                return $success;
+            }
+
+            $targetVersion = $retryVersion;
+        }
+
+        return false;
+    }
+
+    protected function downloadUsingComposerVersion2(string $targetDir, string $targetVersion): bool
+    {
+        $downloadManager = $this->composer->getDownloadManager();
+        $retries = count($this->getElectronVersions());
+
+        while ($retries--) {
+            $package = $this->createComposerInMemoryPackage($targetDir, $targetVersion);
+
+            [$success, $retryVersion] = $this->tryDownload(
+                function () use ($targetDir, $package, $downloadManager) {
+                    $loop = $this->composer->getLoop();
+                    $promise = $downloadManager->download($package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->prepare('install', $package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->install($package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                    $promise = $downloadManager->cleanup('install', $package, $targetDir);
+                    if ($promise) {
+                        $loop->wait(array($promise));
+                    }
+                },
+                $targetVersion
+            );
+
+            if ($retryVersion === null) {
+                return $success;
+            }
+
+            $targetVersion = $retryVersion;
+        }
+
+        return false;
+    }
+
+    protected function generateElectronBinaryClass(string $binaryPath, string $version): void
+    {
+        file_put_contents(
+            __DIR__ . '/ElectronBinary.php',
+            "<?php\n" .
+            "\n" .
+            "namespace ElectronInstaller;\n" .
+            "\n" .
+            "class ElectronBinary\n" .
+            "{\n" .
+            "    public const BIN = " . var_export($binaryPath, true) . ";\n" .
+            "    public const DIR = " . var_export(dirname($binaryPath), true) . ";\n" .
+            "    public const VERSION = " . var_export($version, true) . ";\n" .
+            "}\n"
         );
-
-        return (bool)file_put_contents(__DIR__ . '/ElectronBinary.php', $fileContent);
     }
 
     /**
@@ -415,14 +381,14 @@ class Installer
      * @param string $version
      * @return string Download URL
      */
-    public function getURL($version)
+    protected function getURL(string $version): string
     {
         $cdn_url = $this->getCdnUrl($version);
 
         if (($os = $this->getOS()) && ($arch = $this->getArch())) {
             $file = sprintf('electron-v%s-%s-%s.zip', $version, $os, $arch);
         } else {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'The Installer could not select a Electron package for this OS.
                 Please install Electron manually into the /bin folder of your project.'
             );
@@ -430,11 +396,6 @@ class Installer
 
         return $cdn_url . $file;
     }
-
-    /**
-     * Default CDN URL
-     */
-    const ELECTRON_CDNURL_DEFAULT = 'https://github.com/electron/electron/';
 
     /**
      * Returns the base URL for downloads.
@@ -446,13 +407,12 @@ class Installer
      * - default location (github)
      *
      * @param string $version
-     *
      * @return string URL
      */
-    public function getCdnUrl($version)
+    protected function getCdnUrl(string $version): string
     {
         $url = '';
-        $extraData = $this->getComposer()->getPackage()->getExtra();
+        $extraData = $this->composer->getPackage()->getExtra();
 
         // override the detection of the default URL
         // by checking for an env var and returning early
@@ -464,17 +424,17 @@ class Installer
             $url = $extraData[static::PACKAGE_NAME]['cdnurl'];
         }
 
-        if ($url == '') {
+        if ($url === '') {
             $url = static::ELECTRON_CDNURL_DEFAULT;
         }
 
         // add slash at the end of the URL, if missing
-        if ($url[strlen($url) - 1] != '/') {
+        if ($url[strlen($url) - 1] !== '/') {
             $url .= '/';
         }
 
         // add version to URL when using "github.com/electron/electron"
-        if (substr(strtolower($url), -29) == 'github.com/electron/electron/') {
+        if (strtolower(substr($url, -29)) === 'github.com/electron/electron/') {
             $url .= 'releases/download/v' . $version . '/';
         }
 
@@ -486,9 +446,9 @@ class Installer
      *
      * @return string|null OS, e.g. darwin, win32, linux.
      */
-    public function getOS()
+    protected function getOS(): ?string
     {
-        // override the detection of the operation system
+        // override the detection of the operating system
         // by checking for an env var and returning early
         if (isset($_ENV['ELECTRON_PLATFORM'])) {
             return strtolower($_ENV['ELECTRON_PLATFORM']);
@@ -502,6 +462,8 @@ class Installer
 
         switch (true) {
             case strpos($uname, 'darwin') !== false:
+            case strpos($uname, 'openbsd') !== false:
+            case strpos($uname, 'freebsd') !== false:
                 return 'darwin';
 
             case strpos($uname, 'win') !== false:
@@ -520,7 +482,7 @@ class Installer
      *
      * @return string|null Architecture, e.g. ia32, x64, arm.
      */
-    public function getArch()
+    protected function getArch(): ?string
     {
         // override the detection of the architecture by checking for an env var and returning early
         if (isset($_ENV['ELECTRON_ARCHITECTURE'])) {

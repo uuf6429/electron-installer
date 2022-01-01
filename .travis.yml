@@ -1,24 +1,37 @@
 language: php
 
-sudo: false
+os:
+  - linux
+  - windows
+  - osx
+
+php:
+  - 7.2
+  - 7.4
+  - 8.0
+  - 8.1
+
+jobs:
+  allow_failures:
+    - os: windows     # PHP not available here yet
+    - os: osx         # PHP not available here yet
+    - php: 8.1        # Apparently not available at the moment
 
 cache:
-  directory:
-    - $HOME/.composer/cache/files
-
-php: [5.5, 5.6, 7, hhvm]
+  - directories:
+      - $HOME/.composer/cache/files
 
 before_install:
   - composer self-update
-  - composer install --no-interaction --prefer-source
+  - composer install --no-interaction --prefer-dist
 
 script:
   - phpunit --configuration ./tests/phpunit.xml.dist
-  # Test dev-master install
-  - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version" && composer install -vvv --profile
-  #- ls -ashF bin
-  #- bin/electron -v
-  # Test v1.0.0 install
-  - cd "$TRAVIS_BUILD_DIR/tests/example-v1.0.0" && composer install -vvv --profile
-  #- ls -ashF bin
-  #- bin/electron -v
+
+  - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version"
+  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - composer install -vvv --profile
+
+  - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0"
+  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - composer install -vvv --profile

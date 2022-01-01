@@ -15,13 +15,14 @@
         }
     ],
     "require": {
-        "php": ">5.3",
+        "php": "^7.2 || ^8.0",
         "ext-bz2": "*",
+        "ext-json": "*",
         "ext-openssl": "*"
     },
     "require-dev": {
-        "composer/composer": "^1.2",
-        "phpunit/phpunit": "^4.8"
+        "composer/composer": "^1 || ^2",
+        "phpunit/phpunit": "^8"
     },
     "autoload": {
         "psr-4": {
