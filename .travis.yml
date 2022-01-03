@@ -29,9 +29,9 @@ script:
   - phpunit --configuration ./tests/phpunit.xml.dist
 
   - cd "$TRAVIS_BUILD_DIR/tests/example-latest-version"
-  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - sed -i "s/dev-master/dev-$TRAVIS_COMMIT/g" composer.json
   - composer install -vvv --profile
 
   - cd "$TRAVIS_BUILD_DIR/tests/example-v16.0.0"
-  - sed -i "s/dev-master/dev-$TRAVIS_BRANCH/g" composer.json
+  - sed -i "s/dev-master/dev-$TRAVIS_COMMIT/g" composer.json
   - composer install -vvv --profile
