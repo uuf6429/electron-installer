@@ -2,7 +2,7 @@ electron-installer
 ==================
 
 [![Packagist](https://img.shields.io/packagist/v/uuf6429/electron-installer.svg)](https://packagist.org/packages/uuf6429/electron-installer)
-[![Build Status](https://travis-ci.org/uuf6429/electron-installer.png)](https://travis-ci.org/uuf6429/electron-installer)
+[![Build Status](https://api.travis-ci.com/uuf6429/electron-installer.png)](https://app.travis-ci.com/github/uuf6429/electron-installer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/uuf6429/electron-installer/master/LICENSE)
 
 A Composer package which installs the Electron binary (Linux, Windows, Mac) into `/bin` of your project.
